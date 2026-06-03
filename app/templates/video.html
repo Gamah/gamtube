@@ -6,9 +6,111 @@
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; height: 100vh; display: flex; align-items: center; justify-content: center; }
 video { max-width: 100%; max-height: 100vh; }
+#overlay {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.6);
+  transition: opacity .4s;
+  cursor: pointer;
+  z-index: 10;
+}
+#overlay.hidden { opacity: 0; pointer-events: none; }
+#card {
+  background: #111;
+  color: #eee;
+  padding: 1.5rem 2rem;
+  border-radius: 8px;
+  max-width: 360px;
+  width: 90%;
+  font-family: system-ui, sans-serif;
+  font-size: .9rem;
+  line-height: 1.5;
+  cursor: default;
+}
+#card p { margin-bottom: 1rem; }
+#share-row { display: flex; gap: .5rem; margin-bottom: 1rem; }
+#share-url {
+  flex: 1;
+  background: #222;
+  color: #ccc;
+  border: 1px solid #333;
+  padding: .4rem .6rem;
+  border-radius: 4px;
+  font-size: .8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#copy-btn {
+  background: #333;
+  color: #eee;
+  border: none;
+  padding: .4rem .8rem;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: .8rem;
+}
+#copy-btn:hover { background: #444; }
+#bmc { display: block; color: #ffdd57; text-decoration: none; font-size: .85rem; }
+#bmc:hover { text-decoration: underline; }
+#close-btn {
+  float: right;
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 1.1rem;
+  cursor: pointer;
+  line-height: 1;
+  margin: -.3rem -.5rem 0 .5rem;
+}
+#close-btn:hover { color: #eee; }
 </style>
 </head>
 <body>
 <video src="{{ video_url }}" controls autoplay></video>
+<div id="overlay">
+  <div id="card" onclick="event.stopPropagation()">
+    <button id="close-btn" onclick="dismiss()">&#x2715;</button>
+    <p>Paste any YouTube, Instagram, TikTok, or Facebook URL and get a clean shareable link back.</p>
+    <div id="share-row">
+      <span id="share-url"></span>
+      <button id="copy-btn" onclick="copyLink()">Copy</button>
+    </div>
+    <a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615; Buy me a coffee</a>
+  </div>
+</div>
+<script>
+(function () {
+  var overlay = document.getElementById('overlay');
+  var shareUrl = document.getElementById('share-url');
+  var copyBtn = document.getElementById('copy-btn');
+  var url = window.location.href;
+
+  shareUrl.textContent = url;
+  shareUrl.title = url;
+
+  var timer = setTimeout(dismiss, 5000);
+
+  overlay.addEventListener('click', dismiss);
+
+  function dismiss() {
+    clearTimeout(timer);
+    overlay.classList.add('hidden');
+  }
+
+  function copyLink() {
+    navigator.clipboard.writeText(url).then(function () {
+      copyBtn.textContent = 'Copied!';
+      setTimeout(function () { copyBtn.textContent = 'Copy'; }, 1500);
+    });
+  }
+
+  window.dismiss = dismiss;
+  window.copyLink = copyLink;
+}());
+</script>
 </body>
 </html>
