@@ -31,7 +31,7 @@ def _get_or_create_submitter_id(request: Request) -> str:
 @router.get("/", response_class=HTMLResponse)
 @router.get("/submit", response_class=HTMLResponse)
 async def submit_form(request: Request):
-    return templates.TemplateResponse(request, "submit.html")
+    return HTMLResponse(templates.get_template("submit.html").render())
 
 
 @router.post("/submit")

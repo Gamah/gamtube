@@ -26,10 +26,10 @@ async def video_page(
 
     if video.status == "ready":
         video_url = storage.get_url(video.video_path)
-        return templates.TemplateResponse(request, "video.html", {"video_url": video_url})
+        return HTMLResponse(templates.get_template("video.html").render(video_url=video_url))
     if video.status == "error":
-        return templates.TemplateResponse(request, "error.html", {"error": video.error_message})
-    return templates.TemplateResponse(request, "status.html", {"status": video.status, "short_id": short_id})
+        return HTMLResponse(templates.get_template("error.html").render(error=video.error_message))
+    return HTMLResponse(templates.get_template("status.html").render(status=video.status, short_id=short_id))
 
 
 @router.get("/v/{short_id}/status.json", response_model=StatusResponse)
