@@ -28,6 +28,7 @@ gamtube/
 │   ├── models.py            # Video ORM model
 │   ├── schemas.py           # Pydantic request/response shapes
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
+│   ├── rendering.py         # jinja2.Environment wrapper; render(name, **ctx) → HTMLResponse
 │   ├── storage/
 │   │   ├── base.py          # StorageBackend ABC
 │   │   ├── local.py         # LocalStorageBackend
@@ -47,6 +48,7 @@ gamtube/
 ├── static/
 │   └── style.css
 ├── media/                   # default MEDIA_ROOT (gitignored)
+├── logs/                    # app.log written by systemd service (gitignored)
 ├── migrations/
 │   ├── env.py               # reads DATABASE_URL from app.config
 │   ├── script.py.mako
@@ -208,11 +210,11 @@ python run.py
 sudo bash deploy.sh --domain your.domain.tld
 ```
 
-Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers a systemd service.
+Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers a systemd service. Re-running deploy.sh on an existing install is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
 
 ```bash
 systemctl status gamtube
-journalctl -u gamtube -f
+tail -f /opt/gamtube/logs/app.log
 ```
 
 ---
