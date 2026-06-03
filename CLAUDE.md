@@ -22,10 +22,10 @@ Submissions require an API key. Viewing is public.
 ```
 gamtube/
 ├── app/
-│   ├── main.py              # app factory, router registration, startup
+│   ├── main.py              # app factory, router registration, static mounts
 │   ├── config.py            # Settings (pydantic-settings), get_storage() factory
-│   ├── database.py          # engine, SessionLocal, Base
-│   ├── models.py            # Video ORM model + StatusEnum
+│   ├── database.py          # lazy engine + SessionLocal(), Base, get_db()
+│   ├── models.py            # Video ORM model
 │   ├── schemas.py           # Pydantic request/response shapes
 │   ├── auth.py              # X-API-Key dependency
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
@@ -38,18 +38,23 @@ gamtube/
 │   │   ├── transcoder.py    # ffmpeg H.264 normalization, stream-copy if already H.264
 │   │   └── worker.py        # orchestrates download → transcode → store → DB update
 │   ├── routers/
-│   │   ├── submit.py        # POST /submit (auth required)
+│   │   ├── submit.py        # GET / GET /submit (form) + POST /submit (auth required)
 │   │   └── videos.py        # GET /v/{id}, /v/{id}/status.json
 │   └── templates/
-│       ├── submit.html      # paste URL form, shows output link to copy on success
+│       ├── submit.html      # JS fetch form; API key stored in localStorage
 │       ├── video.html       # ONLY a <video> tag — no title, no metadata, no chrome
-│       ├── status.html      # plain processing status + auto-refresh, no chrome
+│       ├── status.html      # plain processing status + meta-refresh, no chrome
 │       └── error.html       # plain error message, no chrome
 ├── static/
 │   └── style.css
 ├── media/                   # default MEDIA_ROOT (gitignored)
-├── migrations/              # alembic
+├── migrations/
+│   ├── env.py               # reads DATABASE_URL from app.config
+│   ├── script.py.mako
+│   └── versions/
+│       └── 0001_init.py     # initial schema migration
 ├── alembic.ini
+├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + systemd
 ├── .env.example
 ├── requirements.txt
 └── run.py                   # uvicorn app.main:app --reload
@@ -77,8 +82,8 @@ Table: `videos`
 | `tags` | JSON nullable | stored, never displayed |
 | `video_path` | String(512) nullable | storage key (`{short_id}.mp4`) |
 | `file_size_bytes` | BigInteger nullable | |
-| `created_at` | DateTime | server default UTC |
-| `updated_at` | DateTime | onupdate UTC |
+| `created_at` | DateTime | Python-side UTC default |
+| `updated_at` | DateTime | Python-side `onupdate` UTC |
 
 Metadata is captured from yt-dlp and stored in the DB for your own records. It is never rendered to viewers.
 
@@ -93,7 +98,16 @@ def short_id_for(url: str) -> str:
     return hashlib.sha256(url.encode()).hexdigest()[:12]
 ```
 
-Same URL always produces the same 12-char hex ID. At 48 bits, collisions between different URLs are negligible for a personal tool (~1 in 281 trillion). The `source_url` unique constraint provides a secondary integrity check.
+Same URL always produces the same 12-char hex ID. The `source_url` unique constraint is the secondary integrity check; duplicate submissions return the existing `short_id` immediately without re-downloading.
+
+---
+
+## Database (`app/database.py`)
+
+Engine and session factory are created lazily on first use via `@lru_cache`, so importing the module doesn't require a valid `.env`. Two entry points:
+
+- `get_db()` — FastAPI dependency (yields, auto-closes)
+- `SessionLocal()` — function returning a plain `Session`; used by `worker.py` which runs outside request context
 
 ---
 
@@ -112,21 +126,19 @@ Storage key is always `{short_id}.mp4` — flat, no subdirectory.
 `LocalStorageBackend`: moves file into `MEDIA_ROOT/{key}`, returns `{MEDIA_BASE_URL}/{key}`.
 `S3StorageBackend`: stub, all methods raise `NotImplementedError` with `# TODO: boto3`.
 
-Each backend implementation owns how it maps the logical key to a URL. A future Akamai backend returns whatever CDN URL format Akamai requires — the app never sees it.
-
-Active backend injected via `get_storage()` FastAPI dependency based on `STORAGE_BACKEND` env var.
+`get_storage()` in `config.py` is used as a FastAPI `Depends()` in both routers. The resolved instance is passed directly to `process_video` via `BackgroundTasks`.
 
 ---
 
 ## Download Pipeline (`app/pipeline/`)
 
-**`downloader.py`**: uses `yt_dlp.YoutubeDL` as a library. `format="bestvideo+bestaudio/best"`. No thumbnail download. Returns yt-dlp info dict + downloaded file path.
+**`downloader.py`**: uses `yt_dlp.YoutubeDL` as a library. `format="bestvideo+bestaudio/best"`. Output template is `video.%(ext)s`; the actual output file is found by globbing the temp dir and picking the largest non-partial file (handles yt-dlp's merged output filenames robustly).
 
 **`transcoder.py`**: probes input with `ffprobe` (JSON output). If video codec is already `h264` and container is `mp4`, uses `-c copy`. Otherwise: `-c:v libx264 -crf 23 -preset fast -c:a aac -b:a 128k`.
 
-**`worker.py`** (called via `BackgroundTasks`):
+**`worker.py`** (`process_video`, called via `BackgroundTasks`):
 1. Set `status = downloading`
-2. Download to `tempfile.mkdtemp(dir=TEMP_DIR)` → update metadata fields in DB
+2. Download to `tempfile.mkdtemp(dir=TEMP_DIR)` → write metadata fields to DB (title, description, uploader, duration, tags)
 3. Set `status = transcoding`
 4. Transcode to `{tmp}/{short_id}.mp4`
 5. `storage.save(mp4_path, f"{short_id}.mp4")`
@@ -142,22 +154,22 @@ Swap to Celery/ARQ in future by replacing `background_tasks.add_task(process_vid
 
 | Method | Path | Auth | Behavior |
 |---|---|---|---|
-| `GET` | `/` | public | Render submit form (homepage) |
+| `GET` | `/` | public | Render submit form |
 | `GET` | `/submit` | public | Render submit form |
 | `POST` | `/submit` | API key | Derive `short_id` from URL hash → if exists return it; else create record, enqueue, return `short_id` immediately |
-| `GET` | `/v/{short_id}` | public | `ready` → render video.html (just `<video>`); processing → render status.html; `error` → render error.html |
-| `GET` | `/v/{short_id}/status.json` | public | `{"status": "...", "error": null}` — polled by status.html meta-refresh or JS |
+| `GET` | `/v/{short_id}` | public | `ready` → render video.html; processing → render status.html; `error` → render error.html |
+| `GET` | `/v/{short_id}/status.json` | public | `{"status": "...", "error": null}` — polled by status.html meta-refresh |
 | `GET` | `/media/{path:path}` | public | `StaticFiles` mount at `MEDIA_ROOT` (dev); nginx in prod |
 
-No index of videos. No browse/discover endpoint.
+`POST /submit` returns `{"short_id": "...", "url": "https://domain.tld/v/..."}`.
 
-`POST /submit` returns `{"short_id": "...", "url": "https://domain.tld/v/..."}` — the submit form displays this as a copyable link.
+The submit form (`submit.html`) sends `POST /submit` via JS fetch with `X-API-Key` from localStorage. The key is entered once and persisted across sessions.
 
 ---
 
 ## Auth (`app/auth.py`)
 
-`APIKeyHeader(name="X-API-Key")` dependency on `POST /submit` only. Key compared against `API_KEY` env var. Returns 401 on mismatch. Future multi-user: replace env var check with hashed `api_keys` table lookup — route decorators unchanged.
+`APIKeyHeader(name="X-API-Key")` dependency on `POST /submit` only. Key compared against `API_KEY` env var. Returns 401 on mismatch.
 
 ---
 
@@ -170,7 +182,7 @@ MEDIA_ROOT=./media
 MEDIA_BASE_URL=http://localhost:8000/media
 STORAGE_BACKEND=local           # local | s3
 BASE_URL=http://localhost:8000
-TEMP_DIR=                       # optional; defaults to system temp (tempfile.gettempdir())
+TEMP_DIR=                       # optional; defaults to system temp
 # S3 (ignored when STORAGE_BACKEND=local):
 S3_BUCKET=
 S3_REGION=us-east-1
@@ -180,28 +192,32 @@ S3_SECRET_KEY=
 
 ---
 
-## Implementation Order
+## Running Locally
 
-1. `config.py` + `database.py` + `models.py`
-2. `ids.py` + `auth.py`
-3. `storage/base.py` + `storage/local.py` + `storage/s3.py`
-4. `schemas.py`
-5. `routers/submit.py` + `routers/videos.py` (stubs — verify routing + auth work)
-6. `pipeline/downloader.py` + `pipeline/transcoder.py`
-7. `pipeline/worker.py` — wires 6 into submit route
-8. Templates
-9. Alembic migration + `alembic upgrade head`
-10. `requirements.txt` + `.env.example` + `run.py`
+```bash
+cp .env.example .env   # set API_KEY=testkey
+alembic upgrade head
+python run.py
+```
+
+## Deploying (Ubuntu 24.04 LXC)
+
+```bash
+sudo bash deploy.sh --api-key yourkey --domain your.domain.tld
+```
+
+Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers a systemd service.
+
+```bash
+systemctl status gamtube
+journalctl -u gamtube -f
+```
 
 ---
 
 ## Verification
 
 ```bash
-cp .env.example .env  # set API_KEY=testkey
-alembic upgrade head
-python run.py
-
 # Submit a video
 curl -X POST http://localhost:8000/submit \
   -H "X-API-Key: testkey" \
@@ -218,9 +234,6 @@ curl -X POST http://localhost:8000/submit \
 # Poll status
 curl http://localhost:8000/v/aabbccddeeff/status.json
 # → {"status": "ready", "error": null}
-
-# Video page — just the video
-open http://localhost:8000/v/aabbccddeeff
 
 # Auth rejection
 curl -X POST http://localhost:8000/submit \
