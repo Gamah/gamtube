@@ -99,7 +99,8 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable --now gamtube
+systemctl enable gamtube
+systemctl restart gamtube
 
 echo ""
 echo "==> Done."
