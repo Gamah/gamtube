@@ -144,7 +144,8 @@ video { display: block; max-width: 100%; max-height: 100vh; }
         <span class="share-url-text" id="sp-gt-url"></span>
         <button class="copy-btn" onclick="copyUrl(this, 'gamtube')">Copy</button>
       </div>
-      <div class="share-hint">Clean link — works for anyone, no account needed.</div>
+      <div class="share-hint">Clean link &mdash; works for anyone, no account needed.</div>
+      {% if expires_at %}<div id="expiry-line" class="share-hint" style="color:#555;margin-top:.15rem;"></div>{% endif %}
     </div>
     <div class="share-section">
       <div class="share-lbl">original source</div>
@@ -160,7 +161,6 @@ video { display: block; max-width: 100%; max-height: 100vh; }
     <p>Paste any URL from YouTube, Instagram, TikTok, Facebook, Twitter/X&nbsp;&mdash; get a clean, shareable link back. That&rsquo;s it.</p>
     <p><a href="/submit" style="color:#adf;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Share one yourself, get a link&nbsp;&#x2192;</a></p>
     <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
-    {% if expires_at %}<p id="expiry-line" class="muted"></p>{% endif %}
     <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a>
     &nbsp;&middot;&nbsp;<a href="https://github.com/Gamah/gamtube" target="_blank" rel="noopener" style="color:#888;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">GitHub</a></p>
   </div>
@@ -241,17 +241,19 @@ video { display: block; max-width: 100%; max-height: 100vh; }
     var el  = document.getElementById('expiry-line');
     function tick() {
       var diff = exp - Date.now();
-      if (diff <= 0) { el.textContent = 'This copy has expired.'; return; }
+      if (diff <= 0) { el.textContent = 'Expired.'; return; }
       var s = Math.floor(diff / 1000);
       var m = Math.floor(s / 60); s %= 60;
       var h = Math.floor(m / 60); m %= 60;
       var d = Math.floor(h / 24); h %= 24;
+      var ss = (s < 10 ? '0' : '') + s;
+      var mm = (m < 10 ? '0' : '') + m;
       var txt;
-      if (d >= 2)      txt = 'This copy expires in ' + d + ' days.';
-      else if (h || d) txt = 'This copy expires in ' + (d * 24 + h) + 'h ' + m + 'm.';
-      else if (m)      txt = 'This copy expires in ' + m + 'm ' + s + 's.';
-      else             txt = 'This copy expires in ' + s + 's.';
-      el.textContent = txt;
+      if (d)      txt = d + 'd ' + h + 'h ' + mm + 'm ' + ss + 's';
+      else if (h) txt = h + 'h ' + mm + 'm ' + ss + 's';
+      else if (m) txt = m + 'm ' + ss + 's';
+      else        txt = s + 's';
+      el.textContent = 'Expires in ' + txt + '.';
     }
     tick();
     setInterval(tick, 1000);
