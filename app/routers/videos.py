@@ -28,7 +28,7 @@ async def video_page(
 
     if video.status == "ready":
         video_url = storage.get_url(video.video_path)
-        return render("video.html", video_url=video_url)
+        return render("video.html", video_url=video_url, source_url=video.source_url)
     if video.status == "error":
         return render("error.html", error=video.error_message)
     return render("status.html", status=video.status, short_id=short_id)

@@ -7,15 +7,23 @@ GAMTUBE_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAMTUBE_USER="${GAMTUBE_USER:-gamtube}"
 DOMAIN="localhost"
 PORT=8000
+DATA_DIR=""
 
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --domain)  DOMAIN="$2";  shift 2 ;;
-    --port)    PORT="$2";    shift 2 ;;
+    --domain)   DOMAIN="$2";   shift 2 ;;
+    --port)     PORT="$2";     shift 2 ;;
+    --data-dir) DATA_DIR="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
+
+# --- prompt for data dir if not supplied ---
+if [[ -z "$DATA_DIR" ]]; then
+  read -rp "Data directory [/var/lib/gamtube]: " _data_input
+  DATA_DIR="${_data_input:-/var/lib/gamtube}"
+fi
 
 echo "==> Installing system dependencies"
 apt-get update -qq
@@ -34,8 +42,7 @@ fi
 
 DEPLOY_DIR="/opt/gamtube"
 VENV="$DEPLOY_DIR/.venv"
-MEDIA_DIR="/var/lib/gamtube/media"
-DATA_DIR="/var/lib/gamtube"
+MEDIA_DIR="$DATA_DIR/media"
 
 echo "==> Copying application to $DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
