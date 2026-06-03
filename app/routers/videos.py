@@ -1,9 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException
+import asyncio
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_storage
 from app.database import get_db
 from app.models import Video
+from app.progress import get_progress
 from app.rendering import render
 from app.schemas import StatusResponse
 from app.storage.base import StorageBackend
@@ -35,3 +40,42 @@ async def video_status(short_id: str, db: Session = Depends(get_db)):
     if not video:
         raise HTTPException(status_code=404, detail="Not found")
     return StatusResponse(status=video.status, error=video.error_message)
+
+
+@router.get("/v/{short_id}/progress")
+async def video_progress(
+    short_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    video = db.query(Video).filter(Video.short_id == short_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    initial_status = video.status
+
+    async def event_stream():
+        if initial_status in ("ready", "error"):
+            payload = {"stage": initial_status, "pct": 100.0 if initial_status == "ready" else None}
+            yield f"data: {json.dumps(payload)}\n\n"
+            return
+
+        while True:
+            if await request.is_disconnected():
+                return
+
+            p = get_progress(short_id)
+            if p is not None:
+                yield f"data: {json.dumps(p)}\n\n"
+                if p.get("stage") in ("ready", "error"):
+                    return
+            else:
+                yield f"data: {json.dumps({'stage': initial_status, 'pct': None})}\n\n"
+
+            await asyncio.sleep(0.5)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
