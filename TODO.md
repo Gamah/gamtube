@@ -1,10 +1,8 @@
 # TODO
 
-## Show download/transcode progress to clients
+## S3 storage backend
+Implement `S3StorageBackend` in `app/storage/s3.py` (currently all methods raise `NotImplementedError`). Use `boto3`. Should support `save`, `get_url`, `delete`, and return `None` from `get_local_path` (remote backend).
 
-While a video is processing, show the client real-time progress rather than a static status page with meta-refresh.
+## admin panel
+some kind of authed view on a separate port that shows hashes, input url's, file size, views(?? consider implications of project) and expiry time, have a button to renew expiry (with some option to set it like 100 years in the future to make it "permanent" and a delete button
 
-Ideas:
-- SSE (Server-Sent Events) endpoint the status page connects to — zero dependencies, works in all browsers
-- Worker emits progress events (yt-dlp download %, ffmpeg transcode %) into a shared store (in-memory dict for SQLite MVP, Redis for multi-worker)
-- Status page upgrades from meta-refresh polling to a live progress bar

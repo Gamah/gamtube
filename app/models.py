@@ -20,6 +20,7 @@ class Video(Base):
     submitter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )

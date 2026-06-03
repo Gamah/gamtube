@@ -2,9 +2,14 @@
 *.db
 media/
 logs/
+tmp/
 __pycache__/
 *.pyc
 *.pyo
+*.log
 .venv/
 dist/
+build/
 *.egg-info/
+.pytest_cache/
+.DS_Store

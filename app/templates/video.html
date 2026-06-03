@@ -41,25 +41,11 @@ video { display: block; max-width: 100%; max-height: 100vh; }
 .action-btn svg { display: block; }
 .action-btn img { width: 26px; height: 26px; display: block; }
 
-.action-btn[data-copied]::after {
-  content: 'Copied!';
-  position: absolute;
-  right: 3.25rem;
-  background: rgba(0,0,0,.75);
-  color: #fff;
-  font-family: system-ui, sans-serif;
-  font-size: .75rem;
-  padding: .25rem .55rem;
-  border-radius: 4px;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-#info-panel {
+.overlay-panel {
   position: absolute;
   right: 4.5rem;
   bottom: 5rem;
-  width: 270px;
+  width: 290px;
   background: rgba(15,15,15,.92);
   border: 1px solid rgba(255,255,255,.12);
   border-radius: 10px;
@@ -76,11 +62,49 @@ video { display: block; max-width: 100%; max-height: 100vh; }
   transform: scale(.95) translateX(6px);
   transition: opacity .2s, transform .2s;
 }
-#info-panel.open {
+.overlay-panel.open {
   opacity: 1;
   pointer-events: auto;
   transform: scale(1) translateX(0);
 }
+
+/* share panel */
+.share-section { margin-bottom: .85rem; }
+.share-section:last-child { margin-bottom: 0; }
+.share-lbl {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: #666;
+  margin-bottom: .3rem;
+}
+.share-row { display: flex; align-items: center; gap: .45rem; }
+.share-url-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .78rem;
+  font-family: ui-monospace, monospace;
+  color: #aaa;
+}
+.share-hint { font-size: .74rem; color: #555; margin-top: .22rem; line-height: 1.4; }
+.copy-btn {
+  flex-shrink: 0;
+  font-size: .72rem;
+  padding: .18rem .48rem;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 4px;
+  color: #bbb;
+  cursor: pointer;
+  transition: background .1s, color .1s, border-color .1s;
+}
+.copy-btn:hover { background: rgba(255,255,255,.16); }
+.copy-btn.copied { color: #5af; border-color: rgba(85,170,255,.4); }
+
+/* info panel */
 #info-panel p { margin-bottom: .7rem; }
 #info-panel p:last-child { margin-bottom: 0; }
 #bmc { color: #ffdd57; text-decoration: none; }
@@ -98,7 +122,7 @@ video { display: block; max-width: 100%; max-height: 100vh; }
       <img src="/static/awesome_face.svg" alt="">
     </a>
     <!-- share -->
-    <button class="action-btn" id="share-btn" title="Copy link" onclick="copyLink(this)">
+    <button class="action-btn" id="share-btn" title="Share" onclick="toggleShare()">
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
         <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
@@ -113,29 +137,76 @@ video { display: block; max-width: 100%; max-height: 100vh; }
     </button>
   </div>
 
-  <div id="info-panel">
+  <div id="share-panel" class="overlay-panel">
+    <div class="share-section">
+      <div class="share-lbl">gamtube link</div>
+      <div class="share-row">
+        <span class="share-url-text" id="sp-gt-url"></span>
+        <button class="copy-btn" onclick="copyUrl(this, 'gamtube')">Copy</button>
+      </div>
+      <div class="share-hint">Clean link &mdash; works for anyone, no account needed.</div>
+      {% if expires_at %}<div id="expiry-line" class="share-hint" style="color:#555;margin-top:.15rem;"></div>{% endif %}
+    </div>
+    <div class="share-section">
+      <div class="share-lbl">original source</div>
+      <div class="share-row">
+        <span class="share-url-text" id="sp-src-url"></span>
+        <button class="copy-btn" onclick="copyUrl(this, 'source')">Copy</button>
+      </div>
+      <div class="share-hint">Where this video came from.</div>
+    </div>
+  </div>
+
+  <div id="info-panel" class="overlay-panel">
     <p>Paste any URL from YouTube, Instagram, TikTok, Facebook, Twitter/X&nbsp;&mdash; get a clean, shareable link back. That&rsquo;s it.</p>
     <p><a href="/submit" style="color:#adf;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Share one yourself, get a link&nbsp;&#x2192;</a></p>
     <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
-    <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a></p>
+    <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a>
+    &nbsp;&middot;&nbsp;<a href="https://github.com/Gamah/gamtube" target="_blank" rel="noopener" style="color:#888;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">GitHub</a></p>
   </div>
 </div>
 
 <script>
 (function () {
-  var infoPanel = document.getElementById('info-panel');
-  var infoOpen = false;
+  var _gamtubeUrl = window.location.href;
+  var _sourceUrl = {{ source_url | tojson }};
 
-  function toggleInfo() {
-    infoOpen = !infoOpen;
-    infoPanel.classList.toggle('open', infoOpen);
+  document.getElementById('sp-gt-url').textContent = _gamtubeUrl;
+  document.getElementById('sp-src-url').textContent = _sourceUrl;
+
+  var sharePanel = document.getElementById('share-panel');
+  var infoPanel  = document.getElementById('info-panel');
+  var shareOpen = false;
+  var infoOpen  = false;
+
+  function closeAll() {
+    shareOpen = false;
+    infoOpen  = false;
+    sharePanel.classList.remove('open');
+    infoPanel.classList.remove('open');
   }
 
-  function copyLink(btn) {
-    var url = window.location.href;
+  function toggleShare() {
+    var next = !shareOpen;
+    closeAll();
+    if (next) { shareOpen = true; sharePanel.classList.add('open'); }
+  }
+
+  function toggleInfo() {
+    var next = !infoOpen;
+    closeAll();
+    if (next) { infoOpen = true; infoPanel.classList.add('open'); }
+  }
+
+  function copyUrl(btn, which) {
+    var url = which === 'source' ? _sourceUrl : _gamtubeUrl;
     var done = function () {
-      btn.setAttribute('data-copied', '');
-      setTimeout(function () { btn.removeAttribute('data-copied'); }, 1800);
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function () {
+        btn.textContent = 'Copy';
+        btn.classList.remove('copied');
+      }, 1800);
     };
     if (navigator.clipboard) {
       navigator.clipboard.writeText(url).then(done).catch(fallback);
@@ -154,16 +225,40 @@ video { display: block; max-width: 100%; max-height: 100vh; }
   }
 
   document.addEventListener('click', function (e) {
-    if (!infoOpen) return;
-    if (!document.getElementById('info-panel').contains(e.target) &&
-        !document.getElementById('info-btn').contains(e.target)) {
-      infoOpen = false;
-      infoPanel.classList.remove('open');
-    }
+    if (!shareOpen && !infoOpen) return;
+    var inShare = sharePanel.contains(e.target) || document.getElementById('share-btn').contains(e.target);
+    var inInfo  = infoPanel.contains(e.target)  || document.getElementById('info-btn').contains(e.target);
+    if (!inShare && !inInfo) closeAll();
   });
 
-  window.toggleInfo = toggleInfo;
-  window.copyLink = copyLink;
+  window.toggleShare = toggleShare;
+  window.toggleInfo  = toggleInfo;
+  window.copyUrl     = copyUrl;
+
+  {% if expires_at %}
+  (function () {
+    var exp = new Date({{ expires_at | tojson }});
+    var el  = document.getElementById('expiry-line');
+    function tick() {
+      var diff = exp - Date.now();
+      if (diff <= 0) { el.textContent = 'Expired.'; return; }
+      var s = Math.floor(diff / 1000);
+      var m = Math.floor(s / 60); s %= 60;
+      var h = Math.floor(m / 60); m %= 60;
+      var d = Math.floor(h / 24); h %= 24;
+      var ss = (s < 10 ? '0' : '') + s;
+      var mm = (m < 10 ? '0' : '') + m;
+      var txt;
+      if (d)      txt = d + 'd ' + h + 'h ' + mm + 'm ' + ss + 's';
+      else if (h) txt = h + 'h ' + mm + 'm ' + ss + 's';
+      else if (m) txt = m + 'm ' + ss + 's';
+      else        txt = s + 's';
+      el.textContent = 'Expires in ' + txt + '.';
+    }
+    tick();
+    setInterval(tick, 1000);
+  }());
+  {% endif %}
 }());
 </script>
 </body>

@@ -22,7 +22,8 @@ Submissions are public; anyone who can reach the server can submit a URL. Viewin
 ```
 gamtube/
 ├── app/
-│   ├── main.py              # app factory, router registration, static mounts
+│   ├── main.py              # app factory, lifespan (cleanup task), router registration, static mounts
+│   ├── cleanup.py           # background expiry loop; deletes files, marks status=expired
 │   ├── config.py            # Settings (pydantic-settings), get_storage() factory
 │   ├── database.py          # lazy engine + SessionLocal(), Base, get_db()
 │   ├── models.py            # Video ORM model
@@ -54,7 +55,8 @@ gamtube/
 │   ├── script.py.mako
 │   └── versions/
 │       ├── 0001_init.py     # initial schema migration
-│       └── 0002_submitter_id.py  # add submitter_id column
+│       ├── 0002_submitter_id.py  # add submitter_id column
+│       └── 0003_expires_at.py    # add expires_at column
 ├── alembic.ini
 ├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + systemd
 ├── .env.example
@@ -75,7 +77,7 @@ Table: `videos`
 | `id` | Integer PK | |
 | `short_id` | String(12) UNIQUE | SHA-256(source_url)[:12]; indexed |
 | `source_url` | Text UNIQUE | integrity constraint |
-| `status` | String | `pending` `downloading` `transcoding` `ready` `error` |
+| `status` | String | `pending` `downloading` `transcoding` `ready` `error` `expired` |
 | `error_message` | Text nullable | |
 | `title` | Text nullable | stored for record-keeping, never displayed |
 | `description` | Text nullable | stored, never displayed |
@@ -83,8 +85,9 @@ Table: `videos`
 | `duration_seconds` | Integer nullable | stored, never displayed |
 | `tags` | JSON nullable | stored, never displayed |
 | `submitter_id` | String(36) nullable | UUID4 from cookie at submit time |
-| `video_path` | String(512) nullable | storage key (`{short_id}.mp4`) |
-| `file_size_bytes` | BigInteger nullable | |
+| `video_path` | String(512) nullable | storage key (`{short_id}.mp4`); cleared on expiry |
+| `file_size_bytes` | BigInteger nullable | cleared on expiry |
+| `expires_at` | DateTime nullable | set to `ready_time + VIDEO_TTL_HOURS` on each `ready` transition; null if TTL=0 |
 | `created_at` | DateTime | Python-side UTC default |
 | `updated_at` | DateTime | Python-side `onupdate` UTC |
 
@@ -187,12 +190,25 @@ MEDIA_BASE_URL=http://localhost:8000/media
 STORAGE_BACKEND=local           # local | s3
 BASE_URL=http://localhost:8000
 TEMP_DIR=                       # optional; defaults to system temp
+VIDEO_TTL_HOURS=24              # hours until hosted file is deleted; 0 = never expire
 # S3 (ignored when STORAGE_BACKEND=local):
 S3_BUCKET=
 S3_REGION=us-east-1
 S3_ACCESS_KEY=
 S3_SECRET_KEY=
 ```
+
+---
+
+## Video Expiry (`app/cleanup.py`)
+
+Videos expire after `VIDEO_TTL_HOURS` hours (default 24). On expiry the **file is deleted** and `status` is set to `expired`, but the **DB row is kept** so the video can be re-fetched on demand.
+
+**Cleanup loop** — started via FastAPI `lifespan` in `app/main.py`. Runs 30 s after startup, then every 10 minutes. Finds all `ready` rows where `expires_at <= now`, calls `storage.delete()`, and marks them `expired`.
+
+**On-demand re-fetch** — when `GET /v/{short_id}` hits an `expired` row, `video_page` atomically flips status to `pending` (`UPDATE … WHERE status='expired'`, so concurrent requests don't double-enqueue) and adds `process_video` to `BackgroundTasks`. The visitor sees the status/progress page while the video re-downloads and re-encodes. `expires_at` resets to `now + TTL` on the new `ready` transition.
+
+**Info panel countdown** — `video.html` receives `expires_at` as a UTC ISO string and shows a live ticking countdown (seconds precision) in the info panel. Hidden when `VIDEO_TTL_HOURS=0`.
 
 ---
 
