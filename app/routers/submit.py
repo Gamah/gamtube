@@ -1,19 +1,18 @@
 import uuid
 
 from fastapi import APIRouter, BackgroundTasks, Depends, Request
-from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
 from app.config import get_settings, get_storage
 from app.database import get_db
 from app.ids import short_id_for
 from app.models import Video
+from app.rendering import render
 from app.schemas import SubmitRequest
 from app.storage.base import StorageBackend
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _get_or_create_submitter_id(request: Request) -> str:
@@ -28,10 +27,10 @@ def _get_or_create_submitter_id(request: Request) -> str:
     return str(uuid.uuid4())
 
 
-@router.get("/", response_class=HTMLResponse)
-@router.get("/submit", response_class=HTMLResponse)
-async def submit_form(request: Request):
-    return HTMLResponse(templates.get_template("submit.html").render())
+@router.get("/")
+@router.get("/submit")
+async def submit_form():
+    return render("submit.html")
 
 
 @router.post("/submit")

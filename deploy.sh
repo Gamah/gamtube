@@ -66,8 +66,9 @@ BASE_URL=$BASE_URL
 TEMP_DIR=/tmp
 EOF
 
-echo "==> Creating media directory"
+echo "==> Creating media and log directories"
 mkdir -p "$MEDIA_DIR"
+mkdir -p "$DEPLOY_DIR/logs"
 
 echo "==> Fixing permissions"
 chown -R "$GAMTUBE_USER:$GAMTUBE_USER" "$DEPLOY_DIR" "$DATA_DIR"
@@ -90,6 +91,8 @@ EnvironmentFile=$DEPLOY_DIR/.env
 ExecStart=$VENV/bin/uvicorn app.main:app --host 0.0.0.0 --port $PORT
 Restart=on-failure
 RestartSec=5
+StandardOutput=append:$DEPLOY_DIR/logs/app.log
+StandardError=append:$DEPLOY_DIR/logs/app.log
 
 [Install]
 WantedBy=multi-user.target
@@ -101,5 +104,5 @@ systemctl enable --now gamtube
 echo ""
 echo "==> Done."
 echo "    Service : systemctl status gamtube"
-echo "    Logs    : journalctl -u gamtube -f"
+echo "    Logs    : tail -f $DEPLOY_DIR/logs/app.log"
 echo "    Submit  : curl -X POST $BASE_URL/submit -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"
