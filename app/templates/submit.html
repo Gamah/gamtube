@@ -2,15 +2,40 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Submit</title>
+<title>gamtube</title>
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
 <link rel="stylesheet" href="/static/style.css">
+<style>
+#hero { text-align: center; margin-bottom: 2rem; }
+#hero img { width: 72px; height: 72px; display: block; margin: 0 auto 1rem; }
+#tagline { font-size: 1.1rem; font-weight: bold; margin-bottom: .75rem; }
+#about { color: #444; margin-bottom: .5rem; }
+#privacy { color: #888; font-size: .85rem; margin-bottom: 2rem; line-height: 1.5; }
+#result a { color: #00c; }
+footer { margin-top: 3rem; font-size: .72rem; color: #aaa; }
+footer a { color: #aaa; }
+</style>
 </head>
 <body>
+<div id="hero">
+  <img src="/static/awesome_face.svg" alt="Awesome Face">
+</div>
+
+<p id="tagline">Share videos, free of social media.</p>
+<p id="about">Paste any URL from YouTube, Instagram, TikTok, Facebook, or Twitter/X and get a clean, shareable link back. That's it.</p>
+<p id="privacy">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media's reach.</p>
+
 <form id="form">
   <input type="url" id="url" placeholder="Paste video URL" required autofocus>
-  <button type="submit">Submit</button>
+  <button type="submit">Get link</button>
 </form>
 <div id="result"></div>
+
+<footer>
+  Awesome Face &copy; <a href="https://commons.wikimedia.org/wiki/User:East718" target="_blank" rel="noopener">East718</a>,
+  <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>
+</footer>
+
 <script>
 const urlEl = document.getElementById('url');
 const resultEl = document.getElementById('result');
