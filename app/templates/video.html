@@ -6,10 +6,12 @@
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; height: 100vh; display: flex; align-items: center; justify-content: center; }
-video { max-width: 100%; max-height: 100vh; }
+
+#player { position: relative; max-width: 100%; max-height: 100vh; }
+video { display: block; max-width: 100%; max-height: 100vh; }
 
 #actions {
-  position: fixed;
+  position: absolute;
   right: 1rem;
   bottom: 5rem;
   display: flex;
@@ -33,11 +35,12 @@ video { max-width: 100%; max-height: 100vh; }
   transition: background .15s;
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
+  text-decoration: none;
 }
 .action-btn:hover { background: rgba(255,255,255,.18); }
 .action-btn svg { display: block; }
+.action-btn img { width: 26px; height: 26px; display: block; }
 
-/* copied toast on share button */
 .action-btn[data-copied]::after {
   content: 'Copied!';
   position: absolute;
@@ -53,7 +56,7 @@ video { max-width: 100%; max-height: 100vh; }
 }
 
 #info-panel {
-  position: fixed;
+  position: absolute;
   right: 4.5rem;
   bottom: 5rem;
   width: 270px;
@@ -80,39 +83,42 @@ video { max-width: 100%; max-height: 100vh; }
 }
 #info-panel p { margin-bottom: .7rem; }
 #info-panel p:last-child { margin-bottom: 0; }
-#bmc {
-  color: #ffdd57;
-  text-decoration: none;
-}
+#bmc { color: #ffdd57; text-decoration: none; }
 #bmc:hover { text-decoration: underline; }
 .muted { color: #888; font-size: .78rem; }
 </style>
 </head>
 <body>
-<video src="{{ video_url }}" controls autoplay></video>
+<div id="player">
+  <video src="{{ video_url }}" controls autoplay></video>
 
-<div id="actions">
-  <!-- share -->
-  <button class="action-btn" id="share-btn" title="Copy link" onclick="copyLink(this)">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
-      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
-    </svg>
-  </button>
-  <!-- info -->
-  <button class="action-btn" id="info-btn" title="About" onclick="toggleInfo()">
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-      <circle cx="12" cy="12" r="10"/>
-      <line x1="12" y1="8" x2="12" y2="8" stroke-width="2.5"/><line x1="12" y1="12" x2="12" y2="16"/>
-    </svg>
-  </button>
-</div>
+  <div id="actions">
+    <!-- home -->
+    <a class="action-btn" href="/submit" title="Share a video">
+      <img src="/static/awesome_face.svg" alt="">
+    </a>
+    <!-- share -->
+    <button class="action-btn" id="share-btn" title="Copy link" onclick="copyLink(this)">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+        <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+      </svg>
+    </button>
+    <!-- info -->
+    <button class="action-btn" id="info-btn" title="About" onclick="toggleInfo()">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="10"/>
+        <line x1="12" y1="8" x2="12" y2="8" stroke-width="2.5"/><line x1="12" y1="12" x2="12" y2="16"/>
+      </svg>
+    </button>
+  </div>
 
-<div id="info-panel">
-  <p>Paste any URL from YouTube, Instagram, TikTok, Facebook, Twitter/X&nbsp;&mdash; get a clean, shareable link back. That&rsquo;s it.</p>
-  <p><a href="/submit" style="color:#adf;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Share one yourself, get a link&nbsp;&#x2192;</a></p>
-  <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
-  <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a></p>
+  <div id="info-panel">
+    <p>Paste any URL from YouTube, Instagram, TikTok, Facebook, Twitter/X&nbsp;&mdash; get a clean, shareable link back. That&rsquo;s it.</p>
+    <p><a href="/submit" style="color:#adf;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Share one yourself, get a link&nbsp;&#x2192;</a></p>
+    <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
+    <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a></p>
+  </div>
 </div>
 
 <script>
@@ -149,11 +155,10 @@ video { max-width: 100%; max-height: 100vh; }
 
   document.addEventListener('click', function (e) {
     if (!infoOpen) return;
-    var panel = document.getElementById('info-panel');
-    var btn = document.getElementById('info-btn');
-    if (!panel.contains(e.target) && !btn.contains(e.target)) {
+    if (!document.getElementById('info-panel').contains(e.target) &&
+        !document.getElementById('info-btn').contains(e.target)) {
       infoOpen = false;
-      panel.classList.remove('open');
+      infoPanel.classList.remove('open');
     }
   });
 
