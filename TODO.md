@@ -1,18 +1,10 @@
 # TODO
 
-## Video page overlay
+## Show download/transcode progress to clients
 
-Add a dismissible overlay to `video.html` that appears briefly on load, then fades or slides out of the way so the video plays unobstructed.
+While a video is processing, show the client real-time progress rather than a static status page with meta-refresh.
 
-Overlay should contain:
-
-- **Share link** — the current page URL (`window.location.href`) in a click-to-copy field or button. No JS framework; `navigator.clipboard.writeText()` is fine.
-- **About blurb** — one or two sentences explaining what the site is (paste any URL from YouTube, Instagram, TikTok, etc. and get a clean shareable link back).
-- **Buy Me a Coffee link** — `https://buymeacoffee.com/gamah`
-
-### Notes
-
-- No new template — everything goes in `video.html` inline.
-- Keep it minimal: no external CSS/JS, no dependencies, consistent with the rest of the site's no-chrome aesthetic.
-- The overlay should not block the video from starting to load in the background.
-- Auto-dismiss after a few seconds or on first click/tap anywhere is fine; a close button also works.
+Ideas:
+- SSE (Server-Sent Events) endpoint the status page connects to — zero dependencies, works in all browsers
+- Worker emits progress events (yt-dlp download %, ffmpeg transcode %) into a shared store (in-memory dict for SQLite MVP, Redis for multi-worker)
+- Status page upgrades from meta-refresh polling to a live progress bar
