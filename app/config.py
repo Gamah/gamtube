@@ -4,7 +4,6 @@ from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
-    api_key: str
     database_url: str = "sqlite:///./gamtube.db"
     media_root: str = "./media"
     media_base_url: str = "http://localhost:8000/media"

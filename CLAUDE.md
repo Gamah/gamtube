@@ -2,7 +2,7 @@
 
 Personal video re-hosting tool. Paste a URL from any major platform (YouTube, Instagram, TikTok, Facebook, Twitter/X, etc.), yt-dlp downloads it and extracts metadata, ffmpeg normalizes to H.264 MP4, and it gets re-hosted at `domain.tld/v/{short_id}`. No social features, no homepage, no browse/discover. Two use cases only: submit a URL and get a link back, or arrive at a link and be served a video.
 
-Submissions require an API key. Viewing is public.
+Submissions are public; anyone who can reach the server can submit a URL. Viewing is public.
 
 ---
 
@@ -27,7 +27,6 @@ gamtube/
 │   ├── database.py          # lazy engine + SessionLocal(), Base, get_db()
 │   ├── models.py            # Video ORM model
 │   ├── schemas.py           # Pydantic request/response shapes
-│   ├── auth.py              # X-API-Key dependency
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
 │   ├── storage/
 │   │   ├── base.py          # StorageBackend ABC
@@ -38,10 +37,10 @@ gamtube/
 │   │   ├── transcoder.py    # ffmpeg H.264 normalization, stream-copy if already H.264
 │   │   └── worker.py        # orchestrates download → transcode → store → DB update
 │   ├── routers/
-│   │   ├── submit.py        # GET / GET /submit (form) + POST /submit (auth required)
+│   │   ├── submit.py        # GET / GET /submit (form) + POST /submit (public)
 │   │   └── videos.py        # GET /v/{id}, /v/{id}/status.json
 │   └── templates/
-│       ├── submit.html      # JS fetch form; API key stored in localStorage
+│       ├── submit.html      # plain URL form, no API key
 │       ├── video.html       # ONLY a <video> tag — no title, no metadata, no chrome
 │       ├── status.html      # plain processing status + meta-refresh, no chrome
 │       └── error.html       # plain error message, no chrome
@@ -52,7 +51,8 @@ gamtube/
 │   ├── env.py               # reads DATABASE_URL from app.config
 │   ├── script.py.mako
 │   └── versions/
-│       └── 0001_init.py     # initial schema migration
+│       ├── 0001_init.py     # initial schema migration
+│       └── 0002_submitter_id.py  # add submitter_id column
 ├── alembic.ini
 ├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + systemd
 ├── .env.example
@@ -80,6 +80,7 @@ Table: `videos`
 | `uploader` | String(255) nullable | stored, never displayed |
 | `duration_seconds` | Integer nullable | stored, never displayed |
 | `tags` | JSON nullable | stored, never displayed |
+| `submitter_id` | String(36) nullable | UUID4 from cookie at submit time |
 | `video_path` | String(512) nullable | storage key (`{short_id}.mp4`) |
 | `file_size_bytes` | BigInteger nullable | |
 | `created_at` | DateTime | Python-side UTC default |
@@ -156,27 +157,28 @@ Swap to Celery/ARQ in future by replacing `background_tasks.add_task(process_vid
 |---|---|---|---|
 | `GET` | `/` | public | Render submit form |
 | `GET` | `/submit` | public | Render submit form |
-| `POST` | `/submit` | API key | Derive `short_id` from URL hash → if exists return it; else create record, enqueue, return `short_id` immediately |
+| `POST` | `/submit` | public | Derive `short_id` from URL hash → if exists return it; else create record, enqueue, return `short_id` immediately. Sets `submitter_id` cookie. |
 | `GET` | `/v/{short_id}` | public | `ready` → render video.html; processing → render status.html; `error` → render error.html |
 | `GET` | `/v/{short_id}/status.json` | public | `{"status": "...", "error": null}` — polled by status.html meta-refresh |
 | `GET` | `/media/{path:path}` | public | `StaticFiles` mount at `MEDIA_ROOT` (dev); nginx in prod |
 
-`POST /submit` returns `{"short_id": "...", "url": "https://domain.tld/v/..."}`.
+`POST /submit` returns `{"short_id": "...", "url": "https://domain.tld/v/..."}` and sets `Set-Cookie: submitter_id=<uuid4>; HttpOnly; SameSite=Lax; Max-Age=31536000`.
 
-The submit form (`submit.html`) sends `POST /submit` via JS fetch with `X-API-Key` from localStorage. The key is entered once and persisted across sessions.
+The submit form (`submit.html`) sends `POST /submit` via JS fetch with no authentication.
 
 ---
 
-## Auth (`app/auth.py`)
+## Session Identity (`app/routers/submit.py`)
 
-`APIKeyHeader(name="X-API-Key")` dependency on `POST /submit` only. Key compared against `API_KEY` env var. Returns 401 on mismatch.
+On every `POST /submit`, a `submitter_id` UUID4 is read from the request cookie or generated fresh, written to the `videos` row, and echoed back as a persistent cookie. This lets a future auth layer identify the original submitter without a full user system.
+
+Promote a known UUID to owner/admin (e.g. via a one-time env var `OWNER_SESSION_ID`) to gate privileged actions without a full user table.
 
 ---
 
 ## Configuration (`.env` / env vars)
 
 ```
-API_KEY=                        # required
 DATABASE_URL=sqlite:///./gamtube.db
 MEDIA_ROOT=./media
 MEDIA_BASE_URL=http://localhost:8000/media
@@ -195,7 +197,7 @@ S3_SECRET_KEY=
 ## Running Locally
 
 ```bash
-cp .env.example .env   # set API_KEY=testkey
+cp .env.example .env
 alembic upgrade head
 python run.py
 ```
@@ -203,7 +205,7 @@ python run.py
 ## Deploying (Ubuntu 24.04 LXC)
 
 ```bash
-sudo bash deploy.sh --api-key yourkey --domain your.domain.tld
+sudo bash deploy.sh --domain your.domain.tld
 ```
 
 Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers a systemd service.
@@ -220,25 +222,18 @@ journalctl -u gamtube -f
 ```bash
 # Submit a video
 curl -X POST http://localhost:8000/submit \
-  -H "X-API-Key: testkey" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=jNQXAC9IVRw"}'
 # → {"short_id": "aabbccddeeff", "url": "http://localhost:8000/v/aabbccddeeff"}
 
 # Same URL again → same short_id, no re-download
 curl -X POST http://localhost:8000/submit \
-  -H "X-API-Key: testkey" \
   -H "Content-Type: application/json" \
   -d '{"url":"https://www.youtube.com/watch?v=jNQXAC9IVRw"}'
 
 # Poll status
 curl http://localhost:8000/v/aabbccddeeff/status.json
 # → {"status": "ready", "error": null}
-
-# Auth rejection
-curl -X POST http://localhost:8000/submit \
-  -H "Content-Type: application/json" \
-  -d '{"url":"..."}' # → 401
 
 # Verify H.264
 ffprobe media/aabbccddeeff.mp4 2>&1 | grep "Video:"

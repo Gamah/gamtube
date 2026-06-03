@@ -17,6 +17,7 @@ class Video(Base):
     uploader: Mapped[str | None] = mapped_column(String(255), nullable=True)
     duration_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     tags: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    submitter_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
     video_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     file_size_bytes: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     created_at: Mapped[datetime] = mapped_column(

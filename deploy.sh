@@ -1,27 +1,21 @@
 #!/usr/bin/env bash
 # deploy.sh — bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
-# Usage: sudo bash deploy.sh [--api-key YOUR_KEY] [--domain example.com]
+# Usage: sudo bash deploy.sh [--domain example.com]
 set -euo pipefail
 
 GAMTUBE_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAMTUBE_USER="${GAMTUBE_USER:-gamtube}"
-API_KEY=""
 DOMAIN="localhost"
 PORT=8000
 
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --api-key) API_KEY="$2"; shift 2 ;;
     --domain)  DOMAIN="$2";  shift 2 ;;
     --port)    PORT="$2";    shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
-
-if [[ -z "$API_KEY" ]]; then
-  read -rp "API key for submissions: " API_KEY
-fi
 
 echo "==> Installing system dependencies"
 apt-get update -qq
@@ -64,7 +58,6 @@ BASE_URL="http://$DOMAIN${PORT:+:$PORT}"
 [[ "$PORT" == "80" || "$PORT" == "443" ]] && BASE_URL="http://$DOMAIN"
 
 cat > "$DEPLOY_DIR/.env" <<EOF
-API_KEY=$API_KEY
 DATABASE_URL=sqlite:///$DATA_DIR/gamtube.db
 MEDIA_ROOT=$MEDIA_DIR
 MEDIA_BASE_URL=$BASE_URL/media
@@ -109,4 +102,4 @@ echo ""
 echo "==> Done."
 echo "    Service : systemctl status gamtube"
 echo "    Logs    : journalctl -u gamtube -f"
-echo "    Submit  : curl -X POST $BASE_URL/submit -H 'X-API-Key: $API_KEY' -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"
+echo "    Submit  : curl -X POST $BASE_URL/submit -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"

@@ -7,28 +7,22 @@
 </head>
 <body>
 <form id="form">
-  <input type="text" id="key" placeholder="API key" autocomplete="off" spellcheck="false">
   <input type="url" id="url" placeholder="Paste video URL" required autofocus>
   <button type="submit">Submit</button>
 </form>
 <div id="result"></div>
 <script>
-const keyEl = document.getElementById('key');
 const urlEl = document.getElementById('url');
 const resultEl = document.getElementById('result');
 
-keyEl.value = localStorage.getItem('apiKey') || '';
-
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
-  const key = keyEl.value.trim();
   const url = urlEl.value.trim();
-  if (key) localStorage.setItem('apiKey', key);
   resultEl.textContent = 'Submitting…';
   try {
     const res = await fetch('/submit', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-API-Key': key },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ url }),
     });
     const data = await res.json();
