@@ -1,7 +1,8 @@
 import asyncio
 import json
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -16,9 +17,17 @@ from app.storage.base import StorageBackend
 router = APIRouter()
 
 
+def _iso_utc(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    s = dt.isoformat()
+    return s if dt.tzinfo else s + "Z"
+
+
 @router.get("/v/{short_id}")
 async def video_page(
     short_id: str,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_storage),
 ):
@@ -28,9 +37,27 @@ async def video_page(
 
     if video.status == "ready":
         video_url = storage.get_url(video.video_path)
-        return render("video.html", video_url=video_url, source_url=video.source_url)
+        return render(
+            "video.html",
+            video_url=video_url,
+            source_url=video.source_url,
+            expires_at=_iso_utc(video.expires_at),
+        )
+
+    if video.status == "expired":
+        # Re-trigger processing; guard against concurrent re-triggers
+        updated = db.query(Video).filter(
+            Video.short_id == short_id, Video.status == "expired"
+        ).update({"status": "pending"})
+        db.commit()
+        if updated:
+            from app.pipeline.worker import process_video
+            background_tasks.add_task(process_video, video.short_id, video.source_url, storage)
+        return render("status.html", status="pending", short_id=short_id)
+
     if video.status == "error":
         return render("error.html", error=video.error_message)
+
     return render("status.html", status=video.status, short_id=short_id)
 
 

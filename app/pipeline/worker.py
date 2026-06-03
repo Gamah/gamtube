@@ -1,5 +1,6 @@
 import shutil
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from app.config import get_settings
@@ -49,8 +50,12 @@ def process_video(short_id: str, url: str, storage: StorageBackend) -> None:
         local = storage.get_local_path(f"{short_id}.mp4")
         size = local.stat().st_size if local and local.exists() else 0
 
+        expires_at = None
+        if settings.video_ttl_hours > 0:
+            expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.video_ttl_hours)
+
         set_progress(short_id, "ready", 100.0)
-        upd(status="ready", video_path=f"{short_id}.mp4", file_size_bytes=size)
+        upd(status="ready", video_path=f"{short_id}.mp4", file_size_bytes=size, expires_at=expires_at)
 
     except Exception as exc:
         db.query(Video).filter(Video.short_id == short_id).update(

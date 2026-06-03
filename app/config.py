@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     storage_backend: Literal["local", "s3"] = "local"
     base_url: str = "http://localhost:8000"
     temp_dir: str | None = None
+    video_ttl_hours: int = 24
 
     s3_bucket: str = ""
     s3_region: str = "us-east-1"
