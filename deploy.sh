@@ -7,13 +7,14 @@ GAMTUBE_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAMTUBE_USER="${GAMTUBE_USER:-gamtube}"
 DOMAIN="localhost"
 PORT=8000
+PORT_EXPLICIT=false
 DATA_DIR=""
 
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case $1 in
     --domain)   DOMAIN="$2";   shift 2 ;;
-    --port)     PORT="$2";     shift 2 ;;
+    --port)     PORT="$2"; PORT_EXPLICIT=true; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
@@ -61,8 +62,10 @@ python3.12 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet -r "$DEPLOY_DIR/requirements.txt"
 
 echo "==> Writing .env"
-BASE_URL="http://$DOMAIN${PORT:+:$PORT}"
-[[ "$PORT" == "80" || "$PORT" == "443" ]] && BASE_URL="http://$DOMAIN"
+BASE_URL="http://$DOMAIN"
+if [[ "$PORT_EXPLICIT" == "true" && "$PORT" != "80" && "$PORT" != "443" ]]; then
+  BASE_URL="http://$DOMAIN:$PORT"
+fi
 
 cat > "$DEPLOY_DIR/.env" <<EOF
 DATABASE_URL=sqlite:///$DATA_DIR/gamtube.db

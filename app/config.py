@@ -6,9 +6,9 @@ from pydantic_settings import BaseSettings
 class Settings(BaseSettings):
     database_url: str = "sqlite:///./gamtube.db"
     media_root: str = "./media"
-    media_base_url: str = "http://localhost:8000/media"
+    media_base_url: str = "http://localhost/media"
     storage_backend: Literal["local", "s3"] = "local"
-    base_url: str = "http://localhost:8000"
+    base_url: str = "http://localhost"
     temp_dir: str | None = None
     video_ttl_hours: int = 24
 
