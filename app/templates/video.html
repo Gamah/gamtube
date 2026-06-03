@@ -18,6 +18,7 @@ video { max-width: 100%; max-height: 100vh; }
 }
 
 .action-btn {
+  position: relative;
   width: 2.75rem;
   height: 2.75rem;
   border-radius: 50%;
@@ -109,6 +110,7 @@ video { max-width: 100%; max-height: 100vh; }
 <div id="info-panel">
   <p>Paste any URL from YouTube, Instagram, TikTok, Facebook, Twitter/X&nbsp;&mdash; get a clean, shareable link back. That&rsquo;s it.</p>
   <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
+  <p><a href="/submit" style="color:#adf;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">&#x2197;&nbsp;Share a video</a></p>
   <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a></p>
 </div>
 
@@ -123,10 +125,25 @@ video { max-width: 100%; max-height: 100vh; }
   }
 
   function copyLink(btn) {
-    navigator.clipboard.writeText(window.location.href).then(function () {
+    var url = window.location.href;
+    var done = function () {
       btn.setAttribute('data-copied', '');
       setTimeout(function () { btn.removeAttribute('data-copied'); }, 1800);
-    });
+    };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(done).catch(fallback);
+    } else {
+      fallback();
+    }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = url;
+      ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
   }
 
   document.addEventListener('click', function (e) {
