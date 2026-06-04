@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>manage</title>
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+body { max-width: 1400px; }
+h1 { margin-bottom: 1rem; font-size: 1rem; }
+h1 a { color: #aaa; text-decoration: none; font-weight: normal; font-size: .85rem; margin-left: 1rem; }
+h1 a:hover { text-decoration: underline; }
+
+.toolbar { display: flex; gap: .5rem; align-items: center; margin-bottom: 1.2rem; }
+.toolbar input[type="search"] {
+  font-family: monospace; font-size: .85rem;
+  padding: .3rem .5rem; border: 1px solid #ccc; width: 280px;
+}
+.toolbar button { font-family: monospace; font-size: .85rem; padding: .3rem .75rem; cursor: pointer; }
+.toolbar .count { font-size: .78rem; color: #aaa; margin-left: .25rem; }
+
+table { width: 100%; border-collapse: collapse; font-size: .82rem; }
+th, td { text-align: left; padding: .35rem .5rem; border-bottom: 1px solid #eee; vertical-align: middle; }
+th { color: #888; font-weight: normal; font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; white-space: nowrap; }
+
+td.thumb { width: 90px; padding: .25rem .5rem; }
+td.thumb img { width: 80px; height: 45px; object-fit: cover; border-radius: 3px; display: block; }
+
+td.title-col { max-width: 240px; }
+td.title-col .ttl { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: bold; margin-bottom: .15rem; }
+.btn-copy-src {
+  font-family: monospace; font-size: .7rem; color: #aaa;
+  background: none; border: none; cursor: pointer; padding: 0;
+  text-decoration: underline dotted; white-space: nowrap;
+}
+.btn-copy-src:hover { color: #555; }
+.btn-copy-src.copied { color: #5af; text-decoration: none; }
+
+td.col-status span { display: inline-block; padding: .1rem .35rem; border-radius: 3px; font-size: .75rem; }
+.s-ready    { background: #d4edda; color: #155724; }
+.s-expired  { background: #e2e3e5; color: #383d41; }
+.s-error    { background: #f8d7da; color: #721c24; }
+.s-pending,
+.s-downloading,
+.s-transcoding { background: #fff3cd; color: #856404; }
+.s-unlisted   { background: #f0d0ff; color: #5a006d; }
+.s-reencoding { background: #cce5ff; color: #004085; }
+
+.actions { white-space: nowrap; display: flex; gap: .3rem; align-items: center; flex-wrap: wrap; }
+.actions form { margin: 0; }
+.actions select { font-family: monospace; font-size: .78rem; padding: .15rem .2rem; }
+.actions button {
+  font-family: monospace; font-size: .75rem;
+  padding: .15rem .45rem; cursor: pointer; border: 1px solid #ccc; background: #f5f5f5;
+}
+.actions button:hover { background: #e8e8e8; }
+.btn-del    { border-color: #f5c6cb !important; color: #721c24; }
+.btn-del:hover { background: #f8d7da !important; }
+.btn-unlist { border-color: #d0b0ff !important; color: #5a006d; }
+.btn-unlist:hover { background: #f0d0ff !important; }
+.btn-nuke   { border-color: #888 !important; background: #222 !important; color: #f88 !important; }
+.btn-nuke:hover { background: #111 !important; color: #f44 !important; }
+.btn-encode { border-color: #b8d4ff !important; color: #003a8c; }
+.btn-encode:hover { background: #dbeafe !important; }
+
+.pager { margin-top: 1.2rem; display: flex; gap: 1rem; align-items: center; font-size: .82rem; }
+.pager a { color: #333; text-decoration: none; }
+.pager a:hover { text-decoration: underline; }
+.pager .info { color: #aaa; }
+
+.empty { color: #aaa; padding: 2rem 0; }
+
+#toast {
+  position: fixed; bottom: 1.5rem; left: 50%; transform: translateX(-50%);
+  background: #222; color: #fff; padding: .45rem 1.1rem;
+  border-radius: 5px; font-size: .82rem; pointer-events: none;
+  opacity: 0; transition: opacity .4s;
+}
+</style>
+</head>
+<body>
+<div id="toast"></div>
+<h1>manage <a href="/">home</a> <a href="/manage/logout">logout</a></h1>
+
+<form class="toolbar" method="get" action="/manage">
+  <input type="search" name="q" value="{{ q }}" placeholder="search title or URL…" autofocus>
+  <button type="submit">search</button>
+  {% if q %}<a href="/manage" style="font-size:.78rem;color:#aaa">clear</a>{% endif %}
+  <span class="count">{{ total }} video{{ 's' if total != 1 }}</span>
+</form>
+
+{% if rows %}
+<table>
+  <thead>
+    <tr>
+      <th></th>
+      <th>id</th>
+      <th>title</th>
+      <th>status</th>
+      <th>reencoded</th>
+      <th>size</th>
+      <th>views</th>
+      <th>created</th>
+      <th>expires</th>
+      <th>actions</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in rows %}
+    <tr data-id="{{ r.short_id }}">
+      <td class="thumb">
+        {% if r.thumbnail_url %}<img src="{{ r.thumbnail_url }}" alt="" loading="lazy" onerror="this.style.display='none'">{% endif %}
+      </td>
+      <td><a href="/v/{{ r.short_id }}">{{ r.short_id }}</a></td>
+      <td class="title-col">
+        {% if r.title %}<span class="ttl" title="{{ r.title }}">{{ r.title }}</span>{% endif %}
+        <button class="btn-copy-src" data-url="{{ r.source_url }}" title="{{ r.source_url }}">copy original link</button>
+      </td>
+      <td class="col-status"><span class="s-{{ r.status }}">{{ r.status }}</span></td>
+      <td class="col-reencoded">
+        {% if r.transcoded == "yes" %}yes
+        {% elif r.transcoded == "skipped" %}skipped
+        {% elif r.transcoded == "no" %}no
+        {% else %}—{% endif %}
+      </td>
+      <td class="col-size">{{ r.file_size }}</td>
+      <td>{{ r.view_count }}</td>
+      <td>{{ r.created_at }}</td>
+      <td class="col-expires">{{ r.expires_at }}</td>
+      <td>
+        <div class="actions">
+          <form data-action="renew" action="/manage/v/{{ r.short_id }}/renew" method="post">
+            <select name="hours">
+              <option value="24">24h</option>
+              <option value="48">48h</option>
+              <option value="168">7d</option>
+              <option value="720">30d</option>
+              <option value="8760">1y</option>
+              <option value="876000">100y</option>
+              <option value="0">permanent</option>
+            </select>
+            <button type="submit">renew</button>
+          </form>
+          <form data-action="delete" action="/manage/v/{{ r.short_id }}/delete" method="post">
+            <button type="submit" class="btn-del">delete</button>
+          </form>
+          <form data-action="unlist" action="/manage/v/{{ r.short_id }}/unlist" method="post">
+            <button type="submit" class="btn-unlist">unlist</button>
+          </form>
+          {% if r.can_reencode %}
+          <form data-action="reencode" action="/manage/v/{{ r.short_id }}/reencode" method="post">
+            <button type="submit" class="btn-encode">re-encode</button>
+          </form>
+          {% endif %}
+          <form data-action="nuke" action="/manage/v/{{ r.short_id }}/nuke" method="post">
+            <button type="submit" class="btn-nuke">nuke</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if total_pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}
+  <a href="/manage?q={{ q | qe }}&page={{ page - 1 }}">← prev</a>
+  {% endif %}
+  <span class="info">{{ page }} / {{ total_pages }}</span>
+  {% if page < total_pages %}
+  <a href="/manage?q={{ q | qe }}&page={{ page + 1 }}">next →</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<p class="empty">{% if q %}no results for "{{ q }}"{% else %}no videos yet{% endif %}</p>
+{% endif %}
+
+<script>
+(function () {
+  var toast = document.getElementById('toast');
+  var toastTid;
+
+  function showToast(msg) {
+    clearTimeout(toastTid);
+    toast.textContent = msg;
+    toast.style.opacity = '1';
+    toastTid = setTimeout(function () { toast.style.opacity = '0'; }, 2400);
+  }
+
+  // Copy source URL buttons
+  document.querySelectorAll('.btn-copy-src').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var url = btn.dataset.url;
+      var done = function () {
+        btn.textContent = 'copied!';
+        btn.classList.add('copied');
+        setTimeout(function () {
+          btn.textContent = 'copy original link';
+          btn.classList.remove('copied');
+        }, 1600);
+      };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(url).then(done).catch(fallback);
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = url; ta.style.cssText = 'position:fixed;opacity:0';
+        document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); done(); } catch(e) {}
+        document.body.removeChild(ta);
+      }
+    });
+  });
+
+  // Action forms via fetch
+  document.querySelectorAll('.actions form').forEach(function (form) {
+    form.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var action = form.dataset.action;
+      var tr = form.closest('tr');
+
+      fetch(form.action, { method: 'POST', body: new FormData(form) })
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          showToast(d.msg || 'done');
+          if (action === 'nuke') {
+            tr.remove();
+          } else if (action === 'delete') {
+            var sp = tr.querySelector('.col-status span');
+            sp.className = 's-expired'; sp.textContent = 'expired';
+            tr.querySelector('.col-size').textContent = '—';
+            tr.querySelector('.col-expires').textContent = '';
+          } else if (action === 'unlist') {
+            var sp = tr.querySelector('.col-status span');
+            sp.className = 's-unlisted'; sp.textContent = 'unlisted';
+            tr.querySelector('.col-size').textContent = '—';
+            tr.querySelector('.col-expires').textContent = 'permanent';
+          } else if (action === 'renew') {
+            if (d.expires) tr.querySelector('.col-expires').textContent = d.expires;
+            if (d.status) {
+              var sp = tr.querySelector('.col-status span');
+              sp.className = 's-' + d.status; sp.textContent = d.status;
+            }
+          } else if (action === 'reencode') {
+            var sp = tr.querySelector('.col-status span');
+            sp.className = 's-reencoding'; sp.textContent = 'reencoding';
+            tr.querySelector('.col-reencoded').textContent = 'no';
+            form.remove();
+          }
+        })
+        .catch(function () { showToast('error'); });
+    });
+  });
+}());
+</script>
+</body>
+</html>

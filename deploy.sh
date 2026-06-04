@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # deploy.sh — bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
-# Usage: sudo bash deploy.sh [--domain example.com]
+# Usage: sudo bash deploy.sh [--domain example.com] [--keep]
+#   --keep  skip all prompts; reuse data-dir and password from existing .env
 set -euo pipefail
 
 GAMTUBE_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -9,6 +10,9 @@ DOMAIN="localhost"
 PORT=8000
 PORT_EXPLICIT=false
 DATA_DIR=""
+KEEP=false
+DEPLOY_DIR="/opt/gamtube"
+TRANSCODE_ENABLED="false"
 
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
@@ -16,14 +20,52 @@ while [[ $# -gt 0 ]]; do
     --domain)   DOMAIN="$2";   shift 2 ;;
     --port)     PORT="$2"; PORT_EXPLICIT=true; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
+    --keep)     KEEP=true; shift ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
 
-# --- prompt for data dir if not supplied ---
-if [[ -z "$DATA_DIR" ]]; then
-  read -rp "Data directory [/var/lib/gamtube]: " _data_input
-  DATA_DIR="${_data_input:-/var/lib/gamtube}"
+# --- --keep: pull existing values, skip prompts ---
+if [[ "$KEEP" == "true" ]]; then
+  if [[ ! -f "$DEPLOY_DIR/.env" ]]; then
+    echo "Error: --keep requires an existing deployment at $DEPLOY_DIR/.env"
+    exit 1
+  fi
+  if [[ -z "$DATA_DIR" ]]; then
+    _existing_media="$(grep -E '^MEDIA_ROOT=' "$DEPLOY_DIR/.env" | cut -d= -f2-)"
+    DATA_DIR="${_existing_media%/media}"
+    [[ -z "$DATA_DIR" ]] && { echo "Error: cannot read DATA_DIR from existing .env"; exit 1; }
+  fi
+  ADMIN_PASSWORD="$(grep -E '^ADMIN_PASSWORD=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)"
+  TRANSCODE_ENABLED="$(grep -E '^TRANSCODE_ENABLED=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || echo "false")"
+else
+  # --- prompt for data dir if not supplied ---
+  if [[ -z "$DATA_DIR" ]]; then
+    read -rp "Data directory [/var/lib/gamtube]: " _data_input
+    DATA_DIR="${_data_input:-/var/lib/gamtube}"
+  fi
+
+  # --- prompt for admin password ---
+  _existing_admin_pw=""
+  if [[ -f "$DEPLOY_DIR/.env" ]]; then
+    _existing_admin_pw="$(grep -E '^ADMIN_PASSWORD=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)"
+  fi
+  if [[ -n "$_existing_admin_pw" ]]; then
+    read -rsp "Admin password for /manage [leave blank to keep existing]: " _admin_pw_input
+    echo
+    ADMIN_PASSWORD="${_admin_pw_input:-$_existing_admin_pw}"
+  else
+    read -rsp "Admin password for /manage (blank = panel disabled): " _admin_pw_input
+    echo
+    ADMIN_PASSWORD="$_admin_pw_input"
+  fi
+
+  read -rp "Re-encode downloads to H.264 MP4? Slower but guarantees browser compatibility [y/N]: " _transcode_input
+  if [[ "$_transcode_input" =~ ^[Yy] ]]; then
+    TRANSCODE_ENABLED="true"
+  else
+    TRANSCODE_ENABLED="false"
+  fi
 fi
 
 echo "==> Installing system dependencies"
@@ -41,7 +83,6 @@ if ! id "$GAMTUBE_USER" &>/dev/null; then
     --create-home "$GAMTUBE_USER"
 fi
 
-DEPLOY_DIR="/opt/gamtube"
 VENV="$DEPLOY_DIR/.venv"
 MEDIA_DIR="$DATA_DIR/media"
 
@@ -74,6 +115,8 @@ MEDIA_BASE_URL=$BASE_URL/media
 STORAGE_BACKEND=local
 BASE_URL=$BASE_URL
 TEMP_DIR=/tmp
+TRANSCODE_ENABLED=$TRANSCODE_ENABLED
+ADMIN_PASSWORD=$ADMIN_PASSWORD
 EOF
 
 echo "==> Creating media and log directories"

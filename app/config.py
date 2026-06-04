@@ -12,6 +12,10 @@ class Settings(BaseSettings):
     temp_dir: str | None = None
     video_ttl_hours: int = 24
 
+    transcode_enabled: bool = False
+
+    admin_password: str = ""
+
     s3_bucket: str = ""
     s3_region: str = "us-east-1"
     s3_access_key: str = ""

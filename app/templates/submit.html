@@ -12,6 +12,33 @@
 #about { color: #444; margin-bottom: .5rem; }
 #privacy { color: #888; font-size: .85rem; margin-bottom: 2rem; line-height: 1.5; }
 #result a { color: #00c; }
+#progress-wrap { margin-top: 1rem; display: none; }
+#progress-label { font-size: .85rem; color: #666; margin-bottom: .4rem; }
+#bar-wrap {
+  width: 260px;
+  height: 5px;
+  background: #e0e0e0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+#bar-fill {
+  height: 100%;
+  width: 0%;
+  background: #4a9eff;
+  border-radius: 3px;
+  transition: width .4s ease;
+}
+@keyframes sweep {
+  0%   { background-position: -260px 0; }
+  100% { background-position: 260px 0; }
+}
+#bar-fill.indeterminate {
+  width: 100%;
+  background: linear-gradient(90deg, #9dd 0%, #4af 40%, #adf 50%, #4af 60%, #9dd 100%);
+  background-size: 520px 100%;
+  animation: sweep 1.4s linear infinite;
+  transition: none;
+}
 footer { margin-top: 3rem; font-size: .72rem; color: #aaa; }
 footer a { color: #aaa; }
 </style>
@@ -30,11 +57,17 @@ footer a { color: #aaa; }
   <button type="submit">Get link</button>
 </form>
 <div id="result"></div>
+<div id="progress-wrap">
+  <p id="progress-label"></p>
+  <div id="bar-wrap"><div id="bar-fill"></div></div>
+</div>
 
 <footer>
   <a href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener" style="color:#888;">&#x2615;&nbsp;Buy me a coffee</a>
   &nbsp;&middot;&nbsp;
   <a href="https://github.com/Gamah/gamtube" target="_blank" rel="noopener">GitHub</a>
+  &nbsp;&middot;&nbsp;
+  <a href="/manage">manage</a>
   &nbsp;&middot;&nbsp;
   Awesome Face &copy; <a href="https://commons.wikimedia.org/wiki/User:East718" target="_blank" rel="noopener">East718</a>,
   <a href="https://creativecommons.org/licenses/by-sa/3.0/" target="_blank" rel="noopener">CC BY-SA 3.0</a>
@@ -43,11 +76,53 @@ footer a { color: #aaa; }
 <script>
 const urlEl = document.getElementById('url');
 const resultEl = document.getElementById('result');
+const progressWrap = document.getElementById('progress-wrap');
+const progressLabel = document.getElementById('progress-label');
+const fillEl = document.getElementById('bar-fill');
+
+const labels = { pending: 'Queued…', downloading: 'Downloading…', transcoding: 'Transcoding…', ready: 'Done!' };
+const labelsIndeterminate = { downloading: 'Merging…', transcoding: 'Transcoding…' };
+
+let activeSource = null;
+
+function startProgress(shortId) {
+  if (activeSource) { activeSource.close(); activeSource = null; }
+  progressWrap.style.display = 'block';
+  progressLabel.textContent = 'Queued…';
+  fillEl.classList.remove('indeterminate');
+  fillEl.style.width = '0%';
+
+  if (!window.EventSource) return;
+  const src = new EventSource('/v/' + shortId + '/progress');
+  activeSource = src;
+
+  src.onmessage = function (e) {
+    const d = JSON.parse(e.data);
+    const indeterminate = d.pct === null || d.pct === undefined;
+    progressLabel.textContent = indeterminate
+      ? (labelsIndeterminate[d.stage] || labels[d.stage] || d.stage)
+      : (labels[d.stage] || d.stage);
+    if (indeterminate) {
+      fillEl.classList.add('indeterminate');
+    } else {
+      fillEl.classList.remove('indeterminate');
+      fillEl.style.width = d.pct.toFixed(1) + '%';
+    }
+    if (d.stage === 'ready' || d.stage === 'error') {
+      src.close();
+      activeSource = null;
+      setTimeout(() => { progressWrap.style.display = 'none'; }, 1200);
+    }
+  };
+
+  src.onerror = function () { src.close(); activeSource = null; };
+}
 
 document.getElementById('form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const url = urlEl.value.trim();
   resultEl.textContent = 'Submitting…';
+  progressWrap.style.display = 'none';
   try {
     const res = await fetch('/submit', {
       method: 'POST',
@@ -56,7 +131,22 @@ document.getElementById('form').addEventListener('submit', async (e) => {
     });
     const data = await res.json();
     if (res.ok) {
-      resultEl.innerHTML = '<a href="' + data.url + '">' + data.url + '</a>';
+      resultEl.innerHTML = '';
+      const a = document.createElement('a');
+      a.href = data.url;
+      a.textContent = data.url;
+      const btn = document.createElement('button');
+      btn.textContent = 'copy';
+      btn.style.marginLeft = '.6rem';
+      btn.addEventListener('click', () => {
+        navigator.clipboard.writeText(data.url).then(() => {
+          btn.textContent = 'copied!';
+          setTimeout(() => { btn.textContent = 'copy'; }, 1600);
+        });
+      });
+      resultEl.appendChild(a);
+      resultEl.appendChild(btn);
+      startProgress(data.short_id);
     } else {
       resultEl.textContent = data.detail || 'Error ' + res.status;
     }

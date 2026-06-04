@@ -33,11 +33,30 @@ body {
   border-radius: 3px;
   transition: width .4s ease;
 }
+@keyframes sweep {
+  0%   { background-position: -260px 0; }
+  100% { background-position: 260px 0; }
+}
+#bar-fill.indeterminate {
+  width: 100%;
+  background: linear-gradient(90deg, #2af 0%, #5cf 40%, #aef 50%, #5cf 60%, #2af 100%);
+  background-size: 520px 100%;
+  animation: sweep 1.4s linear infinite;
+  transition: none;
+}
+#bmc {
+  margin-top: .5rem;
+  font-size: .78rem;
+  color: #555;
+}
+#bmc a { color: #7a6000; text-decoration: none; }
+#bmc a:hover { text-decoration: underline; color: #ffdd57; }
 </style>
 </head>
 <body>
 <p id="status-text">{{ status }}</p>
 <div id="bar-wrap"><div id="bar-fill"></div></div>
+<p id="bmc">too slow? <a href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">☕ bribe the hamster</a> running the servers.</p>
 <script>
 (function () {
   if (!window.EventSource) return;
@@ -46,13 +65,20 @@ body {
   var fillEl = document.getElementById('bar-fill');
   var shortId = '{{ short_id }}';
   var labels = { pending: 'Queued…', downloading: 'Downloading…', transcoding: 'Transcoding…', ready: 'Done!' };
+  var labelsIndeterminate = { downloading: 'Merging…', transcoding: 'Transcoding…' };
 
   var src = new EventSource('/v/' + shortId + '/progress');
 
   src.onmessage = function (e) {
     var d = JSON.parse(e.data);
-    statusEl.textContent = labels[d.stage] || d.stage;
-    if (d.pct !== null && d.pct !== undefined) {
+    var indeterminate = d.pct === null || d.pct === undefined;
+    statusEl.textContent = indeterminate
+      ? (labelsIndeterminate[d.stage] || labels[d.stage] || d.stage)
+      : (labels[d.stage] || d.stage);
+    if (indeterminate) {
+      fillEl.classList.add('indeterminate');
+    } else {
+      fillEl.classList.remove('indeterminate');
       fillEl.style.width = d.pct.toFixed(1) + '%';
     }
     if (d.stage === 'ready') {
