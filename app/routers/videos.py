@@ -35,7 +35,16 @@ async def video_page(
     if not video:
         raise HTTPException(status_code=404, detail="Not found")
 
-    if video.status == "ready":
+    if video.status == "unlisted":
+        from fastapi.responses import HTMLResponse
+        return HTMLResponse(
+            "<html><body><p>This video is no longer available. You know what you did.</p></body></html>",
+            status_code=410,
+        )
+
+    if video.status in ("ready", "reencoding"):
+        video.view_count = (video.view_count or 0) + 1
+        db.commit()
         video_url = storage.get_url(video.video_path)
         return render(
             "video.html",
@@ -82,8 +91,9 @@ async def video_progress(
     initial_status = video.status
 
     async def event_stream():
-        if initial_status in ("ready", "error"):
-            payload = {"stage": initial_status, "pct": 100.0 if initial_status == "ready" else None}
+        if initial_status in ("ready", "reencoding", "error"):
+            payload = {"stage": "ready" if initial_status == "reencoding" else initial_status,
+                       "pct": 100.0 if initial_status in ("ready", "reencoding") else None}
             yield f"data: {json.dumps(payload)}\n\n"
             return
 

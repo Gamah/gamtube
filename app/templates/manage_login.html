@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>manage</title>
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+{% if error %}<p style="color:red;margin-bottom:1rem">{{ error }}</p>{% endif %}
+<form method="post" action="/manage/login">
+  <input type="password" name="password" placeholder="password" autofocus>
+  <button type="submit">Login</button>
+</form>
+</body>
+</html>

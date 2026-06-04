@@ -3,12 +3,14 @@ from pathlib import Path
 
 import yt_dlp
 
+_IMAGE_EXTS = {".jpg", ".jpeg", ".webp", ".png"}
+
 
 def download(
     url: str,
     output_dir: Path,
     on_progress: Callable[[float | None], None] | None = None,
-) -> tuple[dict, Path]:
+) -> tuple[dict, Path, Path | None]:
     def hook(d: dict) -> None:
         if on_progress is None:
             return
@@ -19,13 +21,19 @@ def download(
         elif d["status"] == "finished":
             on_progress(100.0)
 
+    def pp_hook(d: dict) -> None:
+        # Signal indeterminate progress during postprocessing (stream merge, etc.)
+        if on_progress is not None and d.get("status") == "started":
+            on_progress(None)
+
     ydl_opts = {
         "format": "bestvideo+bestaudio/best",
         "outtmpl": str(output_dir / "video.%(ext)s"),
-        "writethumbnail": False,
+        "writethumbnail": True,
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [hook],
+        "postprocessor_hooks": [pp_hook],
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -38,4 +46,14 @@ def download(
     if not files:
         raise RuntimeError("Download produced no output file")
 
-    return info, max(files, key=lambda f: f.stat().st_size)
+    video_files = [f for f in files if f.suffix.lower() not in _IMAGE_EXTS]
+    thumb_files = [f for f in files if f.suffix.lower() in _IMAGE_EXTS]
+
+    if not video_files:
+        raise RuntimeError("Download produced no video file")
+
+    return (
+        info,
+        max(video_files, key=lambda f: f.stat().st_size),
+        thumb_files[0] if thumb_files else None,
+    )

@@ -7,7 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.cleanup import cleanup_loop
 from app.config import get_settings
-from app.routers import submit, videos
+from app.routers import admin, submit, videos
 
 
 @asynccontextmanager
@@ -23,6 +23,7 @@ def create_app() -> FastAPI:
     app = FastAPI(lifespan=lifespan)
     app.include_router(submit.router)
     app.include_router(videos.router)
+    app.include_router(admin.router)
 
     settings = get_settings()
     media_path = Path(settings.media_root)

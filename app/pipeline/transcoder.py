@@ -7,20 +7,28 @@ from pathlib import Path
 
 def _probe(path: Path) -> dict:
     result = subprocess.run(
-        ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(path)],
+        ["ffprobe", "-v", "quiet", "-print_format", "json",
+         "-show_streams", "-show_format", str(path)],
         capture_output=True, text=True, check=True,
     )
     return json.loads(result.stdout)
 
 
-def _duration_us(streams: list[dict]) -> float | None:
-    for s in streams:
+def _duration_us(probe: dict) -> float | None:
+    for s in probe.get("streams", []):
         raw = s.get("duration")
         if raw:
             try:
                 return float(raw) * 1_000_000
             except (ValueError, TypeError):
                 pass
+    # mkv and other containers store duration at format level
+    raw = probe.get("format", {}).get("duration")
+    if raw:
+        try:
+            return float(raw) * 1_000_000
+        except (ValueError, TypeError):
+            pass
     return None
 
 
@@ -29,14 +37,15 @@ def transcode(
     output_path: Path,
     on_progress: Callable[[float | None], None] | None = None,
 ) -> Path:
-    streams = _probe(input_path).get("streams", [])
+    probe = _probe(input_path)
+    streams = probe.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
 
     if video and video.get("codec_name") == "h264" and input_path.suffix.lower() == ".mp4":
         codec_args = ["-c", "copy"]
     else:
         codec_args = [
-            "-c:v", "libx264", "-crf", "23", "-preset", "fast",
+            "-c:v", "libx264", "-crf", "23", "-preset", "superfast",
             "-c:a", "aac", "-b:a", "128k",
         ]
 
@@ -47,7 +56,9 @@ def transcode(
         )
         return output_path
 
-    duration_us = _duration_us(streams)
+    duration_us = _duration_us(probe)
+    if not duration_us:
+        on_progress(None)  # indeterminate — duration unknown, shimmer until done
 
     proc = subprocess.Popen(
         [
