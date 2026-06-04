@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>feedback · gamtube</title>
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<link rel="stylesheet" href="/static/style.css">
+<style>
+body { max-width: 560px; }
+h2 { font-size: 1rem; margin-bottom: 1.5rem; font-weight: normal; color: #555; }
+.back { font-size: .82rem; color: #aaa; text-decoration: none; display: inline-block; margin-bottom: 1.5rem; }
+.back:hover { color: #555; }
+label { display: block; font-size: .82rem; color: #555; margin-bottom: .3rem; }
+label .opt { color: #aaa; font-size: .75rem; margin-left: .3rem; }
+input[type="email"] {
+  width: 100%; padding: .45rem .55rem; margin-bottom: 1.1rem;
+  border: 1px solid #ccc; font-family: monospace; font-size: .9rem;
+  box-sizing: border-box;
+}
+.textarea-wrap { position: relative; margin-bottom: .3rem; }
+textarea {
+  width: 100%; padding: .45rem .55rem;
+  border: 1px solid #ccc; font-family: monospace; font-size: .9rem;
+  resize: vertical; min-height: 160px; box-sizing: border-box;
+  line-height: 1.5;
+}
+textarea:focus { outline: 2px solid #4a9eff; border-color: transparent; }
+textarea.warn  { border-color: #f0a000; }
+textarea.full  { border-color: #d00; }
+.char-counter {
+  font-size: .75rem; color: #aaa; text-align: right;
+  margin-bottom: 1rem; height: 1em;
+  transition: color .15s;
+}
+.char-counter.warn { color: #c07000; font-weight: bold; }
+.char-counter.full { color: #d00; font-weight: bold; }
+.char-counter.full::after { content: ' — limit reached'; }
+button[type="submit"] { margin-top: .2rem; }
+#msg-ok { display: none; color: #155724; background: #d4edda; border: 1px solid #c3e6cb;
+  padding: .6rem .9rem; border-radius: 4px; font-size: .88rem; margin-top: 1rem; }
+#msg-err { display: none; color: #721c24; background: #f8d7da; border: 1px solid #f5c6cb;
+  padding: .6rem .9rem; border-radius: 4px; font-size: .88rem; margin-top: 1rem; }
+</style>
+</head>
+<body>
+{% if ref %}
+<a class="back" href="{{ ref }}">← back</a>
+{% else %}
+<a class="back" href="/submit">← home</a>
+{% endif %}
+
+<h2>Send feedback</h2>
+
+<form id="form" novalidate>
+  <label for="email">Email <span class="opt">(optional — only if you want a reply)</span></label>
+  <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email">
+
+  <label for="message">Message</label>
+  <div class="textarea-wrap">
+    <textarea id="message" name="message" maxlength="2000" placeholder="What's on your mind?" required></textarea>
+  </div>
+  <div class="char-counter" id="counter">0 / 2000</div>
+
+  <button type="submit" id="submit-btn">Send feedback</button>
+</form>
+
+<div id="msg-ok">Thanks! Your feedback was received.</div>
+<div id="msg-err"></div>
+
+<script>
+(function () {
+  var MAX = 2000;
+  var WARN = 1800;
+  var textarea = document.getElementById('message');
+  var counter  = document.getElementById('counter');
+  var submitBtn = document.getElementById('submit-btn');
+
+  function updateCounter() {
+    var len = textarea.value.length;
+    var rem = MAX - len;
+    counter.textContent = len + ' / ' + MAX;
+    textarea.classList.remove('warn', 'full');
+    counter.classList.remove('warn', 'full');
+    if (len >= MAX) {
+      textarea.classList.add('full');
+      counter.classList.add('full');
+    } else if (len >= WARN) {
+      textarea.classList.add('warn');
+      counter.classList.add('warn');
+    }
+  }
+
+  textarea.addEventListener('input', updateCounter);
+
+  document.getElementById('form').addEventListener('submit', async function (e) {
+    e.preventDefault();
+    var email   = document.getElementById('email').value.trim();
+    var message = textarea.value.trim();
+    if (!message) { textarea.focus(); return; }
+
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Sending…';
+
+    try {
+      var res = await fetch('/feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email || null,
+          message: message,
+          vid: {{ vid | tojson }},
+          ref: {{ ref | tojson }},
+        }),
+      });
+      var data = await res.json();
+      if (data.ok) {
+        document.getElementById('form').style.display = 'none';
+        document.getElementById('msg-ok').style.display = 'block';
+      } else {
+        var errEl = document.getElementById('msg-err');
+        errEl.textContent = data.error || 'Something went wrong.';
+        errEl.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Send feedback';
+      }
+    } catch (err) {
+      var errEl = document.getElementById('msg-err');
+      errEl.textContent = 'Network error — please try again.';
+      errEl.style.display = 'block';
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Send feedback';
+    }
+  });
+}());
+</script>
+</body>
+</html>

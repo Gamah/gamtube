@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.config import get_settings, get_storage
 from app.database import get_db
-from app.models import Video
+from app.models import Feedback, Video
 from app.rendering import render
 from app.storage.base import StorageBackend
 
@@ -294,3 +294,36 @@ async def nuke_video(
     db.delete(video)
     db.commit()
     return JSONResponse({"ok": True, "msg": "nuked"})
+
+
+# ── Feedback ──────────────────────────────────────────────────────────────────
+
+@router.get("/manage/feedback")
+async def manage_feedback(request: Request, db: Session = Depends(get_db)):
+    if (redir := _check(request)):
+        return redir
+    items = db.query(Feedback).order_by(Feedback.created_at.desc()).all()
+    rows = [
+        {
+            "id": fb.id,
+            "email": fb.email,
+            "message": fb.message,
+            "video_short_id": fb.video_short_id,
+            "page_url": fb.page_url,
+            "created_at": _fmt_dt(fb.created_at),
+        }
+        for fb in items
+    ]
+    return render("manage_feedback.html", items=rows)
+
+
+@router.post("/manage/feedback/{fb_id}/delete")
+async def delete_feedback(fb_id: int, request: Request, db: Session = Depends(get_db)):
+    if (err := _check_json(request)):
+        return err
+    fb = db.query(Feedback).filter(Feedback.id == fb_id).first()
+    if not fb:
+        return JSONResponse({"ok": False, "msg": "not found"}, status_code=404)
+    db.delete(fb)
+    db.commit()
+    return JSONResponse({"ok": True})
