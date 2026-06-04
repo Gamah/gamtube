@@ -8,11 +8,19 @@ No accounts. No algorithm. No ads. Just the video.
 
 ## How it works
 
-1. Submit a URL — the server downloads it, normalizes to H.264 MP4, and stores it.
+1. Submit a URL — the server downloads it and stores it.
 2. You get a short link. Share it anywhere.
 3. Anyone with the link can watch it — no login, no tracking, no bullshit.
 
 Same URL always produces the same short ID, so submitting a duplicate just returns the existing link instantly.
+
+By default the file is served as downloaded (VP9/AV1 webm from YouTube, etc. — modern browsers handle these fine). Set `TRANSCODE_ENABLED=true` to normalize everything to H.264 MP4 on ingest, or re-encode individual videos on demand from the admin panel.
+
+---
+
+## Admin panel
+
+Set `ADMIN_PASSWORD` in `.env` to enable `/manage` — a paginated table of all videos with per-row actions: renew expiry, delete file, unlist, re-encode to H.264, or nuke the DB row entirely. Leave it empty to disable the panel.
 
 ---
 
