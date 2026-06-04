@@ -163,6 +163,9 @@ video { display: block; max-width: 100%; max-height: 100vh; }
     <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
     <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a>
     &nbsp;&middot;&nbsp;<a href="https://github.com/Gamah/gamtube" target="_blank" rel="noopener" style="color:#888;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">GitHub</a></p>
+    <p style="border-top:1px solid rgba(255,255,255,.08);margin-top:.6rem;padding-top:.7rem;">
+      <a id="feedback-link" href="" style="color:#888;font-size:.76rem;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Send feedback</a>
+    </p>
   </div>
 </div>
 
@@ -170,6 +173,13 @@ video { display: block; max-width: 100%; max-height: 100vh; }
 (function () {
   var _gamtubeUrl = window.location.href;
   var _sourceUrl = {{ source_url | tojson }};
+  var _shortId   = {{ short_id | tojson }};
+
+  (function () {
+    var fl = document.getElementById('feedback-link');
+    var ref = encodeURIComponent(window.location.href);
+    fl.href = '/feedback?vid=' + encodeURIComponent(_shortId) + '&ref=' + ref;
+  }());
 
   document.getElementById('sp-gt-url').textContent = _gamtubeUrl;
   document.getElementById('sp-src-url').textContent = _sourceUrl;

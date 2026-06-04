@@ -30,3 +30,16 @@ class Video(Base):
     updated_at: Mapped[datetime | None] = mapped_column(
         DateTime, nullable=True, onupdate=lambda: datetime.now(timezone.utc)
     )
+
+
+class Feedback(Base):
+    __tablename__ = "feedback"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    video_short_id: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    page_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )

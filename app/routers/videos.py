@@ -50,6 +50,7 @@ async def video_page(
             "video.html",
             video_url=video_url,
             source_url=video.source_url,
+            short_id=video.short_id,
             expires_at=_iso_utc(video.expires_at),
         )
 
