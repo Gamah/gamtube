@@ -18,6 +18,6 @@ def _env() -> jinja2.Environment:
     return env
 
 
-def render(name: str, **ctx: object) -> HTMLResponse:
-    return HTMLResponse(_env().get_template(name).render(**ctx))
+def render(name: str, status_code: int = 200, **ctx: object) -> HTMLResponse:
+    return HTMLResponse(_env().get_template(name).render(**ctx), status_code=status_code)
 

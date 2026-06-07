@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Unavailable</title>
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; height: 100vh; display: flex; align-items: center; justify-content: center; font-family: system-ui, sans-serif; }
+
+#frame {
+  position: relative;
+  width: min(90vw, 640px);
+}
+
+.thumb {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16/9;
+  object-fit: cover;
+  border-radius: 8px;
+  opacity: .3;
+}
+
+.placeholder {
+  width: 100%;
+  aspect-ratio: 16/9;
+  background: #111;
+  border-radius: 8px;
+}
+
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .9rem;
+}
+
+.frown {
+  font-size: 2.6rem;
+  line-height: 1;
+  color: #888;
+  font-family: ui-monospace, monospace;
+  transform: rotate(90deg);
+  display: inline-block;
+  letter-spacing: -.05em;
+}
+
+.label { color: #777; font-size: .88rem; }
+</style>
+</head>
+<body>
+<div id="frame">
+  {% if thumbnail_url %}
+  <img class="thumb" src="{{ thumbnail_url }}" alt="">
+  {% else %}
+  <div class="placeholder"></div>
+  {% endif %}
+  <div class="overlay">
+    <span class="frown">:(</span>
+    <span class="label">You know what you did.</span>
+  </div>
+</div>
+</body>
+</html>
