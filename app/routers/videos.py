@@ -3,10 +3,10 @@ import json
 from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import RedirectResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.config import get_storage
+from app.config import get_settings, get_storage
 from app.database import get_db
 from app.models import Video
 from app.progress import get_progress
@@ -36,39 +36,62 @@ async def video_page(
         raise HTTPException(status_code=404, detail="Not found")
 
     if video.status == "unlisted":
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse(
-            "<html><body><p>This video is no longer available. You know what you did.</p></body></html>",
-            status_code=410,
-        )
+        thumbnail_url = storage.get_url(video.thumbnail_url) if video.thumbnail_url else None
+        return render("unlisted.html", status_code=410, thumbnail_url=thumbnail_url or "")
 
     if video.status in ("ready", "reencoding"):
         video.view_count = (video.view_count or 0) + 1
         db.commit()
         video_url = storage.get_url(video.video_path)
+        thumbnail_url = storage.get_url(video.thumbnail_url) if video.thumbnail_url else None
+        settings = get_settings()
+        canonical_url = f"{settings.base_url.rstrip('/')}/v/{video.short_id}"
+        ext = (video.video_path or "").rsplit(".", 1)[-1].lower()
+        video_mime = "video/mp4" if ext == "mp4" else "video/webm" if ext == "webm" else "video/mp4"
         return render(
             "video.html",
             video_url=video_url,
             source_url=video.source_url,
             short_id=video.short_id,
             expires_at=_iso_utc(video.expires_at),
+            title=video.title or "",
+            thumbnail_url=thumbnail_url or "",
+            canonical_url=canonical_url,
+            video_mime=video_mime,
         )
 
     if video.status == "expired":
-        # Re-trigger processing; guard against concurrent re-triggers
-        updated = db.query(Video).filter(
-            Video.short_id == short_id, Video.status == "expired"
-        ).update({"status": "pending"})
-        db.commit()
-        if updated:
-            from app.pipeline.worker import process_video
-            background_tasks.add_task(process_video, video.short_id, video.source_url, storage)
-        return render("status.html", status="pending", short_id=short_id)
+        thumbnail_url = storage.get_url(video.thumbnail_url) if video.thumbnail_url else None
+        return render("expired.html", short_id=short_id, thumbnail_url=thumbnail_url or "")
 
     if video.status == "error":
         return render("error.html", error=video.error_message)
 
     return render("status.html", status=video.status, short_id=short_id)
+
+
+@router.post("/v/{short_id}/rerequest")
+async def video_rerequest(
+    short_id: str,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_storage),
+):
+    video = db.query(Video).filter(Video.short_id == short_id).first()
+    if not video:
+        raise HTTPException(status_code=404, detail="Not found")
+
+    if video.status != "expired":
+        return RedirectResponse(f"/v/{short_id}", status_code=303)
+
+    updated = db.query(Video).filter(
+        Video.short_id == short_id, Video.status == "expired"
+    ).update({"status": "pending"})
+    db.commit()
+    if updated:
+        from app.pipeline.worker import process_video
+        background_tasks.add_task(process_video, short_id, video.source_url, storage)
+    return RedirectResponse(f"/v/{short_id}", status_code=303)
 
 
 @router.get("/v/{short_id}/status.json", response_model=StatusResponse)

@@ -2,7 +2,20 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
+{% if title %}<title>{{ title }}</title>{% endif %}
 <link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<!-- open graph / chat-app link preview -->
+<meta property="og:type"        content="video.other">
+<meta property="og:url"         content="{{ canonical_url }}">
+{% if title %}<meta property="og:title" content="{{ title | e }}">{% endif %}
+{% if thumbnail_url %}<meta property="og:image" content="{{ thumbnail_url }}">{% endif %}
+<meta property="og:video"       content="{{ video_url }}">
+<meta property="og:video:type"  content="{{ video_mime }}">
+<meta property="og:video:secure_url" content="{{ video_url }}">
+<!-- twitter/x card -->
+<meta name="twitter:card"  content="{% if thumbnail_url %}summary_large_image{% else %}summary{% endif %}">
+{% if title %}<meta name="twitter:title" content="{{ title | e }}">{% endif %}
+{% if thumbnail_url %}<meta name="twitter:image" content="{{ thumbnail_url }}">{% endif %}
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { background: #000; height: 100vh; display: flex; align-items: center; justify-content: center; }
@@ -114,7 +127,7 @@ video { display: block; max-width: 100%; max-height: 100vh; }
 </head>
 <body>
 <div id="player">
-  <video src="{{ video_url }}" controls autoplay></video>
+  <video src="{{ video_url }}" controls autoplay{% if thumbnail_url %} poster="{{ thumbnail_url }}"{% endif %}></video>
 
   <div id="actions">
     <!-- home -->
