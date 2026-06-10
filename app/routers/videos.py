@@ -32,7 +32,7 @@ async def scroll_feed(
 ):
     videos = (
         db.query(Video)
-        .filter(Video.expires_at.is_(None), Video.status == "ready")
+        .filter(Video.expires_at.is_(None), Video.status.in_(("ready", "reencoding")))
         .order_by(func.random())
         .all()
     )
