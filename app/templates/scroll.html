@@ -267,6 +267,22 @@ body { background: #000; overflow: hidden; height: 100vh; }
 
   slides.forEach(function (s) { observer.observe(s); });
 
+  /* Forward wheel events from video elements to the feed's snap navigation.
+     Firefox (and some Chrome builds) intercept the wheel on <video controls>
+     for volume, so the event never reaches the scrollable #feed container. */
+  var feed = document.getElementById('feed');
+  var snapping = false;
+  slides.forEach(function (slide, idx) {
+    slide.querySelector('video').addEventListener('wheel', function (e) {
+      e.preventDefault();
+      if (snapping) return;
+      snapping = true;
+      setTimeout(function () { snapping = false; }, 600);
+      var target = e.deltaY > 0 ? slides[idx + 1] : slides[idx - 1];
+      if (target) target.scrollIntoView({ behavior: 'smooth' });
+    }, { passive: false });
+  });
+
   var sharePanel = document.getElementById('share-panel');
   var infoPanel  = document.getElementById('info-panel');
   var shareOpen = false, infoOpen = false;
