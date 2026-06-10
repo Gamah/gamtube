@@ -4,6 +4,7 @@ from datetime import datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import get_settings, get_storage
@@ -22,6 +23,31 @@ def _iso_utc(dt: datetime | None) -> str | None:
         return None
     s = dt.isoformat()
     return s if dt.tzinfo else s + "Z"
+
+
+@router.get("/scroll")
+async def scroll_feed(
+    db: Session = Depends(get_db),
+    storage: StorageBackend = Depends(get_storage),
+):
+    videos = (
+        db.query(Video)
+        .filter(Video.expires_at.is_(None), Video.status == "ready")
+        .order_by(func.random())
+        .all()
+    )
+    settings = get_settings()
+    base = settings.base_url.rstrip("/")
+    items = []
+    for v in videos:
+        items.append({
+            "short_id": v.short_id,
+            "video_url": storage.get_url(v.video_path),
+            "thumbnail_url": storage.get_url(v.thumbnail_url) if v.thumbnail_url else "",
+            "source_url": v.source_url,
+            "canonical_url": f"{base}/v/{v.short_id}",
+        })
+    return render("scroll.html", videos=items)
 
 
 @router.get("/v/{short_id}")
