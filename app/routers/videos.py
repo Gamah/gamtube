@@ -1,9 +1,11 @@
 import asyncio
+import hashlib
+import hmac as _hmac
 import json
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
-from fastapi.responses import RedirectResponse, StreamingResponse
+from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,21 @@ from app.schemas import StatusResponse
 from app.storage.base import StorageBackend
 
 router = APIRouter()
+
+_ADMIN_COOKIE = "admin_token"
+
+
+def _is_admin(request: Request) -> bool:
+    settings = get_settings()
+    if not settings.admin_password:
+        return False
+    token = request.cookies.get(_ADMIN_COOKIE, "")
+    if not token:
+        return False
+    expected = _hmac.new(
+        settings.admin_password.encode(), b"gamtube-admin-v1", hashlib.sha256
+    ).hexdigest()
+    return _hmac.compare_digest(token, expected)
 
 
 def _iso_utc(dt: datetime | None) -> str | None:
@@ -57,6 +74,7 @@ async def scroll_feed(
 @router.get("/v/{short_id}")
 async def video_page(
     short_id: str,
+    request: Request,
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_storage),
@@ -88,6 +106,7 @@ async def video_page(
             thumbnail_url=thumbnail_url or "",
             canonical_url=canonical_url,
             video_mime=video_mime,
+            is_admin=_is_admin(request),
         )
 
     if video.status == "expired":
@@ -122,6 +141,22 @@ async def video_rerequest(
         from app.pipeline.worker import process_video
         background_tasks.add_task(process_video, short_id, video.source_url, storage)
     return RedirectResponse(f"/v/{short_id}", status_code=303)
+
+
+@router.post("/v/{short_id}/mark-permanent")
+async def mark_permanent(
+    short_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    if not _is_admin(request):
+        raise HTTPException(status_code=401)
+    video = db.query(Video).filter(Video.short_id == short_id).first()
+    if not video:
+        raise HTTPException(status_code=404)
+    video.expires_at = None
+    db.commit()
+    return JSONResponse({"ok": True})
 
 
 @router.get("/v/{short_id}/status.json", response_model=StatusResponse)

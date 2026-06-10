@@ -130,6 +130,14 @@ video { display: block; max-width: 100%; max-height: 100vh; }
   <video src="{{ video_url }}" controls autoplay{% if thumbnail_url %} poster="{{ thumbnail_url }}"{% endif %}></video>
 
   <div id="actions">
+    {% if is_admin and expires_at %}
+    <!-- mark permanent (admin only, only when video has an expiry) -->
+    <button class="action-btn" id="pin-btn" title="Mark permanent" onclick="markPermanent()">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+      </svg>
+    </button>
+    {% endif %}
     <!-- home -->
     <a class="action-btn" href="/submit" title="Share a video">
       <img src="/static/awesome_face.svg" alt="">
@@ -257,6 +265,26 @@ video { display: block; max-width: 100%; max-height: 100vh; }
   window.toggleShare = toggleShare;
   window.toggleInfo  = toggleInfo;
   window.copyUrl     = copyUrl;
+
+  {% if is_admin and expires_at %}
+  function markPermanent() {
+    var btn = document.getElementById('pin-btn');
+    btn.disabled = true;
+    fetch('/v/' + _shortId + '/mark-permanent', { method: 'POST' })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.ok) {
+          btn.remove();
+          var el = document.getElementById('expiry-line');
+          if (el) el.textContent = 'Permanent.';
+        } else {
+          btn.disabled = false;
+        }
+      })
+      .catch(function () { btn.disabled = false; });
+  }
+  window.markPermanent = markPermanent;
+  {% endif %}
 
   {% if expires_at %}
   (function () {
