@@ -1,10 +1,10 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from fastapi.responses import RedirectResponse, StreamingResponse
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.config import get_settings, get_storage
@@ -30,9 +30,13 @@ async def scroll_feed(
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_storage),
 ):
+    now = datetime.now(timezone.utc)
     videos = (
         db.query(Video)
-        .filter(Video.expires_at.is_(None), Video.status.in_(("ready", "reencoding")))
+        .filter(
+            or_(Video.expires_at.is_(None), Video.expires_at > now),
+            Video.status.in_(("ready", "reencoding")),
+        )
         .order_by(func.random())
         .all()
     )
