@@ -1,0 +1,358 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>scroll — gamtube</title>
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #000; overflow: hidden; height: 100vh; }
+
+#feed {
+  height: 100vh;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+#feed::-webkit-scrollbar { display: none; }
+
+.slide {
+  height: 100vh;
+  scroll-snap-align: start;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.slide video {
+  display: block;
+  max-width: 100%;
+  max-height: 100vh;
+}
+
+#empty {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  font-family: system-ui, sans-serif;
+  gap: 1rem;
+}
+#empty a { color: #adf; text-decoration: none; }
+#empty a:hover { text-decoration: underline; }
+
+#actions {
+  position: fixed;
+  right: 1rem;
+  bottom: 5rem;
+  display: flex;
+  flex-direction: column;
+  gap: .75rem;
+  z-index: 10;
+}
+
+.action-btn {
+  position: relative;
+  width: 2.75rem;
+  height: 2.75rem;
+  border-radius: 50%;
+  background: rgba(0,0,0,.55);
+  border: 1.5px solid rgba(255,255,255,.18);
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  text-decoration: none;
+}
+.action-btn:hover { background: rgba(255,255,255,.18); }
+.action-btn svg { display: block; }
+.action-btn img { width: 26px; height: 26px; display: block; }
+
+.overlay-panel {
+  position: fixed;
+  right: 4.5rem;
+  bottom: 5rem;
+  width: 290px;
+  background: rgba(15,15,15,.92);
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 10px;
+  color: #ddd;
+  font-family: system-ui, sans-serif;
+  font-size: .82rem;
+  line-height: 1.55;
+  padding: 1rem 1.1rem;
+  z-index: 10;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  opacity: 0;
+  pointer-events: none;
+  transform: scale(.95) translateX(6px);
+  transition: opacity .2s, transform .2s;
+}
+.overlay-panel.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1) translateX(0);
+}
+
+.share-section { margin-bottom: .85rem; }
+.share-section:last-child { margin-bottom: 0; }
+.share-lbl {
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .07em;
+  color: #666;
+  margin-bottom: .3rem;
+}
+.share-row { display: flex; align-items: center; gap: .45rem; }
+.share-url-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .78rem;
+  font-family: ui-monospace, monospace;
+  color: #aaa;
+}
+.share-hint { font-size: .74rem; color: #555; margin-top: .22rem; line-height: 1.4; }
+.copy-btn {
+  flex-shrink: 0;
+  font-size: .72rem;
+  padding: .18rem .48rem;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.14);
+  border-radius: 4px;
+  color: #bbb;
+  cursor: pointer;
+  transition: background .1s, color .1s, border-color .1s;
+}
+.copy-btn:hover { background: rgba(255,255,255,.16); }
+.copy-btn.copied { color: #5af; border-color: rgba(85,170,255,.4); }
+
+#info-panel p { margin-bottom: .7rem; }
+#info-panel p:last-child { margin-bottom: 0; }
+#bmc { color: #ffdd57; text-decoration: none; }
+#bmc:hover { text-decoration: underline; }
+.muted { color: #888; font-size: .78rem; }
+</style>
+</head>
+<body>
+
+{% if not videos %}
+<div id="empty">
+  <p>No permanent videos yet.</p>
+  <a href="/submit">Share one &rarr;</a>
+</div>
+{% else %}
+
+<div id="feed">
+  {% for v in videos %}
+  <div class="slide"
+       data-short-id="{{ v.short_id }}"
+       data-source-url="{{ v.source_url }}"
+       data-canonical-url="{{ v.canonical_url }}">
+    <video
+      src="{{ v.video_url }}"
+      {% if v.thumbnail_url %}poster="{{ v.thumbnail_url }}"{% endif %}
+      controls
+      playsinline
+      loop
+      preload="none"></video>
+  </div>
+  {% endfor %}
+</div>
+
+<div id="actions">
+  <a class="action-btn" href="/submit" title="Share a video">
+    <img src="/static/awesome_face.svg" alt="">
+  </a>
+  <button class="action-btn" id="share-btn" title="Share" onclick="toggleShare()">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/>
+      <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>
+    </svg>
+  </button>
+  <button class="action-btn" id="info-btn" title="About" onclick="toggleInfo()">
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="10"/>
+      <line x1="12" y1="8" x2="12" y2="8" stroke-width="2.5"/><line x1="12" y1="12" x2="12" y2="16"/>
+    </svg>
+  </button>
+</div>
+
+<div id="share-panel" class="overlay-panel">
+  <div class="share-section">
+    <div class="share-lbl">gamtube link</div>
+    <div class="share-row">
+      <span class="share-url-text" id="sp-gt-url"></span>
+      <button class="copy-btn" onclick="copyUrl(this,'gamtube')">Copy</button>
+    </div>
+    <div class="share-hint">Clean link &mdash; works for anyone, no account needed.</div>
+  </div>
+  <div class="share-section">
+    <div class="share-lbl">original source</div>
+    <div class="share-row">
+      <span class="share-url-text" id="sp-src-url"></span>
+      <button class="copy-btn" onclick="copyUrl(this,'source')">Copy</button>
+    </div>
+    <div class="share-hint">Where this video came from.</div>
+  </div>
+</div>
+
+<div id="info-panel" class="overlay-panel">
+  <p>Paste any URL from YouTube, Instagram, TikTok, Facebook, Twitter/X&nbsp;&mdash; get a clean, shareable link back. That&rsquo;s it.</p>
+  <p><a href="/submit" style="color:#adf;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Share one yourself, get a link&nbsp;&#x2192;</a></p>
+  <p class="muted">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media&rsquo;s reach.</p>
+  <p><a id="bmc" href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener">&#x2615;&nbsp;Buy me a coffee</a>
+  &nbsp;&middot;&nbsp;<a href="https://github.com/Gamah/gamtube" target="_blank" rel="noopener" style="color:#888;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">GitHub</a></p>
+  <p style="border-top:1px solid rgba(255,255,255,.08);margin-top:.6rem;padding-top:.7rem;">
+    <a id="feedback-link" href="/feedback" style="color:#888;font-size:.76rem;text-decoration:none;" onmouseover="this.style.textDecoration='underline'" onmouseout="this.style.textDecoration='none'">Send feedback</a>
+  </p>
+</div>
+
+<script>
+(function () {
+  var slides = Array.from(document.querySelectorAll('.slide'));
+  var currentCanonicalUrl = '';
+  var currentSourceUrl = '';
+  var currentShortId = '';
+
+  function setPreload(idx, val) {
+    var s = slides[idx];
+    if (s) s.querySelector('video').preload = val;
+  }
+
+  function prefetchAround(idx) {
+    slides.forEach(function (_, i) {
+      setPreload(i, Math.abs(i - idx) <= 2 ? 'auto' : 'none');
+    });
+  }
+
+  function updateOverlay(slide) {
+    currentShortId      = slide.dataset.shortId;
+    currentSourceUrl    = slide.dataset.sourceUrl;
+    currentCanonicalUrl = slide.dataset.canonicalUrl;
+    document.getElementById('sp-gt-url').textContent  = currentCanonicalUrl;
+    document.getElementById('sp-src-url').textContent = currentSourceUrl;
+    var fl = document.getElementById('feedback-link');
+    fl.href = '/feedback?vid=' + encodeURIComponent(currentShortId) + '&ref=' + encodeURIComponent(currentCanonicalUrl);
+  }
+
+  if (slides.length) {
+    prefetchAround(0);
+    updateOverlay(slides[0]);
+  }
+
+  var observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      var vid = entry.target.querySelector('video');
+      if (entry.isIntersecting && entry.intersectionRatio >= 0.5) {
+        var idx = slides.indexOf(entry.target);
+        prefetchAround(idx);
+        updateOverlay(entry.target);
+        closeAll();
+        vid.play().catch(function () {});
+      } else {
+        vid.pause();
+      }
+    });
+  }, { threshold: 0.5 });
+
+  slides.forEach(function (s) { observer.observe(s); });
+
+  /* Both <video controls> on desktop (Firefox intercepts wheel for volume) and
+     on mobile (touch events consumed for scrubbing) prevent swipes from reaching
+     the snap-scroll container. Intercept directly on the video element. */
+  var snapping = false;
+  function snapTo(idx) {
+    if (snapping || !slides[idx]) return;
+    snapping = true;
+    setTimeout(function () { snapping = false; }, 700);
+    slides[idx].scrollIntoView({ behavior: 'smooth' });
+  }
+
+  slides.forEach(function (slide, idx) {
+    var vid = slide.querySelector('video');
+    var touchStartY = 0;
+
+    // Desktop: Firefox intercepts wheel on <video controls> for volume
+    vid.addEventListener('wheel', function (e) {
+      e.preventDefault();
+      snapTo(e.deltaY > 0 ? idx + 1 : idx - 1);
+    }, { passive: false });
+
+    // Mobile: video captures touchmove for seek scrubbing
+    vid.addEventListener('touchstart', function (e) {
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    vid.addEventListener('touchmove', function (e) {
+      if (Math.abs(touchStartY - e.touches[0].clientY) > 10) e.preventDefault();
+    }, { passive: false });
+    vid.addEventListener('touchend', function (e) {
+      var dy = touchStartY - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 40) snapTo(dy > 0 ? idx + 1 : idx - 1);
+    }, { passive: true });
+  });
+
+  var sharePanel = document.getElementById('share-panel');
+  var infoPanel  = document.getElementById('info-panel');
+  var shareOpen = false, infoOpen = false;
+
+  function closeAll() {
+    shareOpen = false; infoOpen = false;
+    sharePanel.classList.remove('open');
+    infoPanel.classList.remove('open');
+  }
+
+  function toggleShare() {
+    var next = !shareOpen; closeAll();
+    if (next) { shareOpen = true; sharePanel.classList.add('open'); }
+  }
+
+  function toggleInfo() {
+    var next = !infoOpen; closeAll();
+    if (next) { infoOpen = true; infoPanel.classList.add('open'); }
+  }
+
+  function copyUrl(btn, which) {
+    var url = which === 'source' ? currentSourceUrl : currentCanonicalUrl;
+    var done = function () {
+      btn.textContent = 'Copied!';
+      btn.classList.add('copied');
+      setTimeout(function () { btn.textContent = 'Copy'; btn.classList.remove('copied'); }, 1800);
+    };
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(url).then(done).catch(fallback);
+    } else { fallback(); }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = url; ta.style.cssText = 'position:fixed;opacity:0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); done(); } catch (e) {}
+      document.body.removeChild(ta);
+    }
+  }
+
+  document.addEventListener('click', function (e) {
+    if (!shareOpen && !infoOpen) return;
+    var inShare = sharePanel.contains(e.target) || document.getElementById('share-btn').contains(e.target);
+    var inInfo  = infoPanel.contains(e.target)  || document.getElementById('info-btn').contains(e.target);
+    if (!inShare && !inInfo) closeAll();
+  });
+
+  window.toggleShare = toggleShare;
+  window.toggleInfo  = toggleInfo;
+  window.copyUrl     = copyUrl;
+}());
+</script>
+
+{% endif %}
+</body>
+</html>

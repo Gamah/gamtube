@@ -18,6 +18,14 @@ By default the file is served as downloaded (VP9/AV1 webm from YouTube, etc. —
 
 ---
 
+## Scroll feed
+
+Your instance has a `/scroll` feed — a full-screen, TikTok-style vertical scroll of every video you've marked as permanent (no expiry). Send the link to friends as your personal, curated video feed: no ads, no algorithm, no accounts, no data collection. Just the videos you chose to keep.
+
+Mark any video permanent from the admin panel, or hit the **+** button directly on the video page while logged in.
+
+---
+
 ## Admin panel
 
 Set `ADMIN_PASSWORD` in `.env` to enable `/manage` — a paginated table of all videos with per-row actions: renew expiry, delete file, unlist, re-encode to H.264, or nuke the DB row entirely. Leave it empty to disable the panel.
