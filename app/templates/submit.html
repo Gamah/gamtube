@@ -39,6 +39,19 @@
   animation: sweep 1.4s linear infinite;
   transition: none;
 }
+#scroll-btn {
+  display: block;
+  margin-top: .75rem;
+  padding: .6rem 1.25rem;
+  font-family: monospace;
+  font-size: 1.05rem;
+  color: #555;
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  text-decoration: none;
+  text-align: center;
+}
+#scroll-btn:hover { background: #eee; color: #111; }
 footer { margin-top: 3rem; font-size: .72rem; color: #aaa; }
 footer a { color: #aaa; }
 </style>
@@ -56,6 +69,7 @@ footer a { color: #aaa; }
   <input type="url" id="url" placeholder="Paste video URL" required autofocus>
   <button type="submit">Get link</button>
 </form>
+<a href="/scroll" id="scroll-btn">Bored? Scroll my curated list&hellip;</a>
 <div id="result"></div>
 <div id="progress-wrap">
   <p id="progress-label"></p>
@@ -66,8 +80,6 @@ footer a { color: #aaa; }
   <a href="https://buymeacoffee.com/gamah" target="_blank" rel="noopener" style="color:#888;">&#x2615;&nbsp;Buy me a coffee</a>
   &nbsp;&middot;&nbsp;
   <a href="https://github.com/Gamah/gamtube" target="_blank" rel="noopener">GitHub</a>
-  &nbsp;&middot;&nbsp;
-  <a href="/scroll">scroll</a>
   &nbsp;&middot;&nbsp;
   <a href="/feedback?ref=/submit">feedback</a>
   &nbsp;&middot;&nbsp;
