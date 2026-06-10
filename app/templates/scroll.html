@@ -267,20 +267,38 @@ body { background: #000; overflow: hidden; height: 100vh; }
 
   slides.forEach(function (s) { observer.observe(s); });
 
-  /* Forward wheel events from video elements to the feed's snap navigation.
-     Firefox (and some Chrome builds) intercept the wheel on <video controls>
-     for volume, so the event never reaches the scrollable #feed container. */
-  var feed = document.getElementById('feed');
+  /* Both <video controls> on desktop (Firefox intercepts wheel for volume) and
+     on mobile (touch events consumed for scrubbing) prevent swipes from reaching
+     the snap-scroll container. Intercept directly on the video element. */
   var snapping = false;
+  function snapTo(idx) {
+    if (snapping || !slides[idx]) return;
+    snapping = true;
+    setTimeout(function () { snapping = false; }, 700);
+    slides[idx].scrollIntoView({ behavior: 'smooth' });
+  }
+
   slides.forEach(function (slide, idx) {
-    slide.querySelector('video').addEventListener('wheel', function (e) {
+    var vid = slide.querySelector('video');
+    var touchStartY = 0;
+
+    // Desktop: Firefox intercepts wheel on <video controls> for volume
+    vid.addEventListener('wheel', function (e) {
       e.preventDefault();
-      if (snapping) return;
-      snapping = true;
-      setTimeout(function () { snapping = false; }, 600);
-      var target = e.deltaY > 0 ? slides[idx + 1] : slides[idx - 1];
-      if (target) target.scrollIntoView({ behavior: 'smooth' });
+      snapTo(e.deltaY > 0 ? idx + 1 : idx - 1);
     }, { passive: false });
+
+    // Mobile: video captures touchmove for seek scrubbing
+    vid.addEventListener('touchstart', function (e) {
+      touchStartY = e.touches[0].clientY;
+    }, { passive: true });
+    vid.addEventListener('touchmove', function (e) {
+      if (Math.abs(touchStartY - e.touches[0].clientY) > 10) e.preventDefault();
+    }, { passive: false });
+    vid.addEventListener('touchend', function (e) {
+      var dy = touchStartY - e.changedTouches[0].clientY;
+      if (Math.abs(dy) > 40) snapTo(dy > 0 ? idx + 1 : idx - 1);
+    }, { passive: true });
   });
 
   var sharePanel = document.getElementById('share-panel');
