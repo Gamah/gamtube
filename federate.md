@@ -255,6 +255,23 @@ The practical trigger for the second case is a request arriving at a node for co
 hold. Rate limiting, region blocks and a spent extraction budget also count as "the source is
 not available to me," and need no special handling — they simply mean the node can't derive.
 
+**Why pull upstream when the infohash is already in hand?** Not for correctness — fetching a
+held infohash over BitTorrent is exactly as trustworthy as deriving, since the infohash pins
+the bytes either way. The reasons are freshness and independence. A network that preferred
+peers would drift into a stale mirror: every node holding a two-year-old edition while the
+platform quietly serves something else. "Replicate what was served" means *what is served now*.
+Deriving also keeps a node's ability to obtain live content independent of swarm health.
+
+**This is a default, not an enforceable constraint.** A node that fetches a held infohash from
+peers instead produces byte-identical results, so the deviation is invisible to everyone and
+breaks nothing. An operator on a metered or fragile connection can quietly do so. The rule is a
+statement about being a good citizen of the network, not a security requirement — worth knowing,
+because it means no mechanism is needed to police it.
+
+Note also what the DHT can and cannot answer, since this is where a catalog gets reinvented: it
+is keyed **by** infohash and answers *"who has this,"* never *"what is this."* A node holding an
+infohash needs no lookup to use it; a node without one cannot obtain it from the network at all.
+
 Encoding rules and byte identity are **separate concerns**. Mandating an encoding profile does
 not produce identical bytes: encoder output is not bit-identical across ffmpeg/x264 versions,
 build flags, or thread counts, and container muxing adds its own drift. Determinism comes from
@@ -580,7 +597,11 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
   seeds it.
 - **If a platform serves different byte streams for the same URL, this design breaks.** Every
   node lands in its own swarm, replication stops working for that platform, and the network
-  degenerates into unrelated instances that each downloaded the same video separately. This is
+  degenerates into unrelated instances that each downloaded the same video separately. Note the
+  penalty falls hardest exactly where it hurts most: a heavily-requested video is the one whose
+  swarm most needs to be pooled, and fluctuating edge encodings would shatter it into many
+  single-seeder swarms while obscure content — fetched once, rarely re-derived — is unaffected.
+  This is
   **accepted, not defended against.** Every available defence — corroboration, quorum,
   reputation, adjudicating which edition is canonical — reintroduces exactly the trust machinery
   this design exists without. If it happens at scale it is a bigger conversation about whether
