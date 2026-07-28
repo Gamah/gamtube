@@ -1,9 +1,11 @@
 # gamtube federation
 
 **Status:** design document. Nothing here is implemented.
-**Date:** 2026-07-28. Revised the same day after external review — the catalog discovery
-mechanism, the delivery/verification pairing, and the pin policy all changed. Protocol
-citations below are now read from the BEPs directly rather than recalled.
+**Date:** 2026-07-28, revised repeatedly the same day. The largest revision deleted the catalog
+layer outright: nodes never resolve `short_id` → infohash over the network, which removed the
+only place a node would have weighed a stranger's claim, and with it quorum, corroboration
+counting and sampled verification. Protocol citations are read from the BEPs directly rather
+than recalled; determinism claims are measured, see Appendix A.
 
 This describes turning gamtube from a single-server re-hoster into a federation of
 self-hosted nodes that replicate video between themselves over BitTorrent and serve it to
@@ -47,7 +49,7 @@ pure consumers and that's fine.
 
 ## 2. What this is, and what it isn't
 
-It is **a volunteer CDN over a content-addressed catalog**. Nodes replicate bytes to each
+It is **a volunteer CDN over content-addressed video**. Nodes replicate bytes to each
 other with BitTorrent; viewers fetch over ordinary HTTP.
 
 It is not a tube platform, not a social network, and not an archive with guarantees.
@@ -127,7 +129,7 @@ Layer by rate of change, and never let a fast-changing signal into a slow-changi
 
 | layer | carries | mechanism | changes |
 |---|---|---|---|
-| catalog | `short_id` → source URL, edition list | DHT rendezvous + HTTP query | rarely |
+| identity | `short_id` + infohash | carried in the link itself | never |
 | liveness | who has this infohash right now | mainline DHT | per play |
 | bytes | the video itself, node↔node | BitTorrent | continuously |
 | playback | the video itself, node→viewer | HTTP range over a locally-muxed file | per play |
@@ -145,163 +147,113 @@ excellent at — efficient many-to-many bulk transfer of immutable content — w
 plain HTTP where seeking, range requests, and `<video>` all just work.
 
 **Consequence, stated explicitly:** because the swarm is on the mainline DHT, any stock
-BitTorrent client can fetch anything in it, with no reference to our catalog and no auth. A
+BitTorrent client can fetch anything in it, with no reference to gamtube at all and no auth. A
 node's "serve only registered clients" setting throttles *that node's HTTP bandwidth*. It is
 **not access control**. Unlist and delete cannot claw back anything that has reached a second
 seeder. Nobody should later mistake the auth toggle for privacy.
 
-### Catalog: no federation protocol
+### There is no catalog
 
-No ActivityPub, no follow graph, no signed instance feeds, no inbox/outbox. Instances are
-independent. The link is the entry.
+No ActivityPub, no follow graph, no signed feeds, no rendezvous, no `short_id` lookup of any
+kind. Instances are independent and **the link is the entry.**
 
-What federation would have bought us — avoiding duplicate ingest, and propagating edition
-updates so old links don't die — is bought instead by using the DHT as a **rendezvous**, not
-as a datastore. A node holding an edition of `short_id` announces itself under a synthetic
-target:
+A shareable link carries `short_id` *and* infohash. That is sufficient, because a node only
+ever needs to answer one of two questions:
 
-```
-catalog_target = SHA1("gamtube:catalog:v1:" + short_id)     # 20 bytes
-```
+1. **Is the source URL up?** Then derive it — pull from the platform (§5). Nothing else is
+   consulted.
+2. **Is the source URL down, and was I handed an infohash?** Then fetch that infohash over
+   ordinary BitTorrent. Standard BEP 5 peer discovery on the real infohash; no synthetic
+   targets, no custom protocol.
 
-`announce_peer` on that target, `get_peers` to resolve it. The result is a list of nodes that
-claim to know this `short_id`; you then ask them over HTTP for the edition list.
+Both questions are answered without asking anyone what a `short_id` means. That is the whole
+design, and everything below follows from it.
 
-Verified against BEP 5: `get_peers`/`announce_peer` take an arbitrary 20-byte value as
-`info_hash`, and nothing in the spec requires it to correspond to a real torrent — "the
-queried node should store the IP address of the querying node and the supplied port number
-under the infohash in its store of peer contact information." BEP 5 specifies no TTL for
-announced peer records, so expiry is implementation-defined and nodes must re-announce
-periodically, which BitTorrent clients already do.
+**Earlier drafts had a catalog layer and it has been deleted.** It existed to resolve
+`short_id` → infohash for a node that had neither the source nor the infohash. That capability
+was the *single* point where a node would have accepted a stranger's claim, and it dragged an
+entire apparatus behind it: quorum thresholds, derivation-versus-holder accounting, sampled
+recomputation against the CDN, and a defence against revival-squatting on long-expired ids.
+Removing one lookup removes all of it.
 
-**Why not BEP 44,** recorded so it isn't re-proposed. An earlier draft put a signed mutable
-record in the DHT keyed by `short_id`. That cannot work: per BEP 44 a mutable item's target is
-"the SHA-1 hash of the public key (as it appears in the put message)" plus the salt if
-present. A reader therefore needs the *publisher's Ed25519 public key* to compute the target,
-and cannot derive it from a URL. With no federation graph there is nothing to distribute those
-keys, and a shared keypair would let anyone overwrite the catalog. The salt cap (64 bytes) and
-value cap (1000 bytes bencoded) are real but incidental — the addressing is the blocker.
+Recorded so neither is re-proposed: a **BEP 44 mutable record keyed by `short_id` cannot
+work** — a mutable item's target is "the SHA-1 hash of the public key (as it appears in the put
+message)" plus salt, so a reader needs the publisher's key and cannot derive the address from a
+URL. A **BEP 5 rendezvous on a synthetic target does work** technically — the spec places no
+constraint on the 20-byte value — but it is exactly the lookup we no longer want.
 
-Rendezvous also removes the size ceiling: the edition list is fetched over HTTP, not squeezed
-into a 1000-byte DHT value.
+The cost, stated plainly: **a bare `short_id` whose source URL is dead is unavailable.** No
+lookup, no recovery, no exception. Links carry infohashes for precisely this reason.
 
-Records still decay. A node that stops re-announcing stops being discoverable, and a
-`short_id` nobody holds stops resolving. That is on-thesis.
+### Why no verification is needed
 
-### Verification is recomputation
+Because a node only ever fetches an infohash it was *handed*, there is no moment at which it
+accepts a stranger's assertion about what content is.
 
-`short_id` → source URL is not invertible, so an instance handed a `short_id` it didn't ingest
-cannot know where to re-fetch from. The source URL therefore travels inside the catalog
-answer, and that much is self-validating: any reader checks
-`SHA256(canonical(answer.source_url))[:12] == short_id`. An answer cannot lie about which URL
-it describes.
+**BitTorrent pins the bytes.** Every block is checked against the merkle tree; the infohash is
+the content. A rogue node cannot inject different bytes into a swarm under someone else's
+infohash — it would have to break the hash function. It can refuse to serve, stall, or lie about
+what it holds, none of which substitutes content. The failure modes are availability failures,
+not integrity failures.
 
-The infohash attached to it is a different matter, and the answer is **not** a trust graph.
-Because ingest is deterministic (§5), the binding from URL to bytes to infohash is
-*reproducible*, so **anyone can verify it by recomputing it.** No signatures, no identity, no
-allowlist, no reputation. Nodes stay anonymous because nothing depends on who they are — only
-on whether the bytes they advertise are the bytes the pinned config yields for that URL.
+So there is no verification step, no quorum, no recomputation-on-adopt, no derivation counting,
+and no sampled range-requesting of the source CDN. Those all existed to make a `short_id`
+lookup safe, and the lookup is gone.
 
-This is the footing reproducible builds stand on. It is not a proof you can hand a third party
-— you cannot demonstrate to someone else what the platform served you without trusting your
-report — but it is something every participant can check for themselves, which is what
-actually matters here.
-
-**Full verification costs as much as ingest**, so it is made cheap by sampling. With BitTorrent
-v2 the merkle tree has 16 KiB leaf blocks (BEP 52: "the root hash of a merkle tree with a
-branching factor of 2, constructed from 16KiB blocks of the file", SHA2-256), so a verifier can
-range-request a random sample of blocks directly from the source CDN, hash them, and check them
-against the tree. A few hundred KiB gives high confidence about a multi-hundred-MB file.
-Substituting actual video content changes a large fraction of blocks and is caught; altering a
-single block is not a useful attack against a media file. This is why v2 infohashes are close
-to mandatory rather than optional here — see §11.
-
-**Quorum is a cheap signal, not the foundation.** k nodes on independent network paths
-advertising the same infohash is corroboration a verifier gets for free, and disagreement is
-the flag worth surfacing — it means a regional difference, a platform re-encode, or a lying
-node. But the security property is recomputation; quorum only saves you the trouble.
+**Determinism is still load-bearing, but for a different reason.** It is what makes two nodes
+independently deriving the same URL arrive at the same swarm rather than fragmenting into
+separate ones. If a platform starts serving different byte streams for the same URL, this design
+breaks — and that is accepted rather than defended against. Patching around it would mean
+rebuilding exactly the trust machinery just deleted. See §12.
 
 ### Rogue nodes
 
-Nodes are anonymous and anyone can run one, so assume a hostile fraction. What matters is that
-a rogue node's reach is bounded by which channel it is on.
+Nodes are anonymous and anyone can run one, so assume a hostile fraction. Their reach is bounded
+by the fact that every fetch is infohash-addressed.
 
-**It cannot forge bytes over BitTorrent.** The infohash pins the content and every block is
-checked against the merkle tree. A rogue can refuse to serve, stall, or lie about what it
-holds; it cannot hand another node different bytes under the same infohash. This is the
-channel that carries all node↔node traffic, so the replication layer is not attackable by
-byte substitution at all.
+**They cannot substitute bytes** — see above.
 
-**It cannot serve a viewer it has no relationship with.** Per the capability matrix in §6,
-direct-serve means serving *that node's own registered clients*. Strangers serve other nodes,
-over BitTorrent, where the previous paragraph applies. A viewer's bytes come from the node they
-registered with — frequently their own hardware — so there is no path by which an arbitrary
-hostile node reaches a viewer's player.
+**They cannot serve a viewer they have no relationship with.** Per §6, direct-serve means
+serving *that node's own registered clients*. Strangers serve other nodes, over BitTorrent. A
+viewer's bytes come from the node they registered with, frequently their own hardware.
 
 That is what makes serve-time muxing safe. A locally-muxed file is *by construction*
-unverifiable against the raw streams' tree — remuxing changes byte sequences, sizes and
-offsets, so no mapping back to the raw block hashes exists — but the node performing the mux
-already validated the raw bytes against the swarm, and it is a node the viewer chose. Buying
-protection against your own chosen node would cost an MSE player on every client, forfeiting
-the plain-HTTP dumb-client property that justified not delivering over BitTorrent in the first
-place (§4). A client wanting end-to-end verification fetches the raw streams and muxes them
-itself — an option for a native client, never the default.
+unverifiable against the raw streams' tree — remuxing changes byte sequences, sizes and offsets,
+so no mapping back to the block hashes exists — but the node performing the mux already
+validated the raw bytes against the swarm, and it is a node the viewer chose. Buying protection
+against your own chosen node would cost an MSE player on every client, forfeiting the
+plain-HTTP dumb-client property that justified not delivering over BitTorrent at all. A client
+wanting end-to-end verification fetches the raw streams and muxes them itself — a native-client
+option, never the default.
 
-**Its two real surfaces are edition advertisement and DHT position.** A rogue can advertise a
-poisoned edition for a `short_id`, which recomputation catches (below). And because discovery
-is the mainline DHT, it can sybil the rendezvous target or attempt to eclipse a `short_id`,
-crowding out honest answers. Mitigations are the ordinary ones — query repeatedly, prefer
-answers from diverse networks, treat a single-source answer as weak.
-
-**The backstop that makes none of this load-bearing: self-ingest.** Every rogue-node attack
-degrades to "you fetch it from the source yourself," which involves no other node, no DHT, and
-no trust. It costs bandwidth, not correctness. No node is ever on the critical path for
-obtaining content that still exists upstream.
-
-### Verification is demand-driven, never speculative
-
-Platform media URLs carry expiry and signature parameters, so a stored URL cannot simply be
-range-requested later — a fresh yt-dlp extraction is needed first. That costs no more than
-self-ingest would, since both need exactly one resolve, and sampling still avoids the bulk
-transfer by taking it from peers.
-
-But it means **extraction, not bandwidth, is the scarce resource.** Verifying editions merely
-*discovered* in the DHT, which nobody asked for, would multiply extraction traffic against the
-platform and invite HTTP 429s or an outright block on a homelab IP. So: verify only editions
-the node was going to acquire anyway, never crawl-and-verify, honour backoff, and treat
-extraction as a budgeted resource per §11.
-
-**What cannot be verified:** cold content whose source has gone. There is nothing to recompute
-against, so an edition of a dead URL is trust-on-first-use or nothing. That is an honest limit,
-and it is the same limit that makes such content unrecoverable in the first place (§7).
-
-This publishes source URLs to the public DHT. Consistent with the mainline decision above.
+**The one open surface: abandoned swarms.** A rogue can watch for a `short_id`/infohash pair
+with few or no seeders and start seeding *its own* file. It cannot serve that file under the
+original infohash, so it cannot poison an existing link — but it can occupy the space around a
+dying video and, over time, be the only thing still answering. Worth tracking rather than
+solving now: a later concern, recorded here so it isn't forgotten.
 
 ---
 
 ## 5. Ingest
 
-### Independent ingest is the norm, replication is the fallback
+### The acquisition rule
 
-**Every node pulls from upstream itself, by default.** Independent ingest is the normal path,
-not a fallback. Because ingest is deterministic, honest nodes converge on the same infohash
-without coordinating, and a node that diverges is visible without anyone having to trust
-anyone. Agreement is *observed*, not negotiated.
+There are two cases and no others.
 
-Peer replication is the pressure valve, used when independent ingest is unavailable or
-unaffordable: the source is gone, the region blocks it, or the platform is rate-limiting. It is
-also the right choice for a node that only wants to cache content for its viewers rather than
-assert anything about it.
+**If the source URL is up, always pull from the platform.** Every node, every time, no
+exceptions and nothing consulted first. Deterministic ingest means independent pulls land on the
+same infohash and therefore the same swarm, so the network converges without coordinating.
 
-### Deriving and holding are different claims
+**If the source URL is down, fetch the infohash you were handed, over BitTorrent.** No
+verification, no corroboration, no quorum — the infohash pins the bytes, and a rogue would have
+to break the hash function to substitute anything (§4).
 
-A node that ingested from upstream **derived** the infohash and is evidence. A node that
-replicated from peers **holds** the bytes and asserts nothing — it inherited someone else's
-claim. Catalog answers must distinguish them, because conflating the two lets a single rogue
-edition replicated across ten caches masquerade as ten-way corroboration.
+That is the entire policy. A node never asks anyone what a `short_id` means, so there is no
+third case in which it would weigh someone else's claim.
 
-So the meaningful count is **independent derivations**; holders are availability only. A
-derivation count of one means nobody has corroborated it yet, whatever the seed count says.
+The practical trigger for the second case is a request arriving at a node for content it doesn't
+hold. Rate limiting, region blocks and a spent extraction budget also count as "the source is
+not available to me," and need no special handling — they simply mean the node can't derive.
 
 Encoding rules and byte identity are **separate concerns**. Mandating an encoding profile does
 not produce identical bytes: encoder output is not bit-identical across ffmpeg/x264 versions,
@@ -385,23 +337,17 @@ extract mints no edition rather than a wrong one.
    fallback, this fails the ingest rather than diverging it, and is resolved by changing the
    pinned config, which mints a new edition on purpose rather than by accident.
 
-Note what is *not* on this list: node identity, node honesty, and node acquaintance. A node
-that lies about what the platform served it produces bytes that fail recomputation (§4).
+Note what is *not* on this list: node identity, node honesty, and node acquaintance. Nothing a
+node claims can affect another node's bytes, because every fetch is infohash-addressed (§4).
 
-Divergence is therefore the exception path, not the normal one. **Provenance travels with
-every edition** so an exception can be diagnosed instead of guessed at: yt-dlp version, format
-id, player client, ingest timestamp, ingest region.
+Divergence between nodes is therefore not a security event — it is a swarm-fragmentation event.
+Two honest nodes that derive different bytes end up in different swarms for the same video,
+which costs replication and nothing else. **Provenance travels with every edition** so this can
+be diagnosed rather than guessed at: yt-dlp version, format id, player client, ingest timestamp,
+ingest region. Differing provenance explains most divergence; identical provenance yielding
+different bytes means the platform changed underneath.
 
-This is where provenance earns its keep, and it is a diagnostic use rather than a security one
-(§12). Divergence with *differing* provenance is benign — a stale config, another region, a
-format that moved. Divergence with *identical* provenance is the red flag: either the platform
-changed underneath both nodes, or one of them is lying.
-
-**Reporting divergence stays local and advisory.** A node records what it observed: who
-advertised what, with which provenance, and whether it matched what the node derived itself.
-That record informs that node's own choices and nothing else. A gossiped or global blocklist
-would be a reputation system over anonymous nodes — sybil-able, false-accusation-able, and a
-rebuild of the trust graph this design deliberately removed (§4).
+Provenance is diagnostic only, never a security claim, since it is self-reported (§12).
 
 ### Why nothing may be processed at ingest
 
@@ -559,19 +505,22 @@ compare infohashes; then a third fetches by infohash from peers instead of upstr
 *Proves:* independent convergence in the wild, and that peer replication works as the fallback.
 *Broken:* discovery is manual — you tell the nodes about each other by hand.
 
-**4. HTTP delivery with verification.** Serve-time remux of the raw streams into a playable
-file, cached locally. Byte-range requests over that — no HLS, since there is no ABR ladder and
-ranges map cleanly onto merkle boundaries. Per-block hash check in a service worker against the
-v2 tree of the *raw* streams, multi-node range fetch with mid-stream failover.
-*Proves:* the browser leg, including that a serving node can't substitute bytes.
-*Broken:* still no automatic node discovery. Note the verification boundary — a viewer can
-verify raw stream bytes, but a locally-muxed file is by definition unverifiable, so the check
-belongs on the fetch path rather than the playback path.
+**4. HTTP delivery.** Serve-time remux of the raw streams into a playable file, cached locally.
+Byte-range requests over that, with seeking. No HLS — there is no ABR ladder to need it.
+*Proves:* the browser leg, on ordinary `<video>` with no custom player.
+*Broken:* still no automatic node discovery.
 
-**5. DHT rendezvous.** Announce and resolve on `catalog_target`, HTTP edition-list exchange
-distinguishing derivations from holdings, re-announce loop, extraction budget with backoff, and
-local divergence records.
-*Proves:* discovery and observed convergence without a federation protocol.
+**There is deliberately no client-side verification here.** A remuxed file cannot be checked
+against the raw streams' merkle tree — remuxing changes byte sequences, sizes and offsets, so no
+mapping back to the block hashes exists. Verification happens at the node, which validates
+everything it pulls from the swarm before muxing; the browser trusts the node it registered
+with (§4, Rogue nodes). A client that wants end-to-end verification fetches the raw streams and
+muxes them itself with MSE — a native-client option, never the default.
+
+**5. Fallback fetch by infohash.** A request arrives for content the node doesn't hold and whose
+source URL is dead; the node fetches the infohash from the link over ordinary BitTorrent, with
+an extraction budget and backoff governing when it decides the source is unavailable to it.
+*Proves:* the cold path, with no catalog and no lookup.
 *Broken:* no accounts, so no pin budgets.
 
 **6. Accounts, pin budgets, availability UI.** Per-node registration, like-to-pin,
@@ -589,26 +538,23 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
   handled locally at serve time and no longer constrains the choice.
 - **Serve-time remux caching** — how long a muxed file is kept, and whether it's regenerated
   per request or on first play. Pure local resource management, invisible to the protocol.
-- **Extraction budget** — how many upstream resolves a node performs per hour, how it backs off
-  on 429, and when it gives up on independent ingest and replicates from peers instead. This is
-  the binding constraint on "every node pulls from upstream itself" and it needs real numbers
-  from observed platform behaviour, not a guess.
-- **What a divergence observation is worth** — how a node weights its own record of a
-  previously-divergent peer without that becoming a de facto reputation score.
-- **BitTorrent v2 (BEP 52) is now close to mandatory,** not optional — sampled verification
-  (§4) depends on 16 KiB merkle leaves, and v1's SHA-1 is weak against deliberate collisions.
-  The open part is client and library support for v2 in whatever torrent stack we embed.
-  Verify before committing; a v1 fallback loses cheap verification entirely.
-- **Sampling parameters** — how many blocks, chosen how, and what confidence that yields
-  against an adversary willing to alter a minority of the file.
+- **Extraction budget** — how many upstream resolves a node performs per hour and how it backs
+  off on 429, i.e. when it concludes the source is unavailable to it and falls to the infohash
+  path. Needs real numbers from observed platform behaviour, not a guess.
+- **BitTorrent v2 (BEP 52) vs v1** — v2's SHA-256 merkle trees are stronger than v1's SHA-1,
+  which is weak against deliberate collisions, and multi-file editions get per-file trees. The
+  open part is v2 support in whatever torrent stack we embed. Less critical than it was once
+  sampled verification was removed, but the collision argument stands on its own.
 - **Whether platforms other than YouTube are deterministic at all.** Appendix A tests YouTube
-  only. Instagram and TikTok re-encode far more aggressively and may not converge; if they
-  don't, they fall back to copy-the-bytes with no recomputation check available.
-- **Regional divergence in practice** — untested. If two regions routinely yield different
-  bytes for the same format id, quorum weakens to per-region quorum.
+  only. Instagram and TikTok re-encode far more aggressively; if they don't converge, every
+  node ends up in its own swarm for that platform and replication stops working there.
+- **Regional divergence in practice** — untested. If two regions routinely yield different bytes
+  for the same format id, the network fragments along regional lines.
 - **URL canonicalisation ruleset** — per-platform rules, tracking-param stripping, and whether
-  it's versioned so it can ever change without renaming the catalog. The *requirement* is
-  locked; the ruleset is open.
+  it's versioned so it can ever change without renaming everything. The *requirement* is locked;
+  the ruleset is open.
+- **Abandoned-swarm squatting** — tracking rogue nodes that seed their own file alongside a
+  dying `short_id` (§4). Deferred, deliberately.
 - **Home-instance-vouched tokens** — the later alternative to per-node registration.
 - **Relay fallback** — when it engages, who pays, how it's capped.
 
@@ -626,23 +572,24 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
   arbitrary public submissions for strangers are materially different positions. The operator
   onboarding has to say so in plain words, not in a ToS nobody reads.
 - **DHT announces are public and permanent.** Anything that reaches a second seeder cannot be
-  recalled. Design moderation around removing catalog records and refusing to serve, not around
-  deletion.
-- **Platform rate limiting is the ceiling on independent ingest.** Fifty instances each pulling
-  the same video from upstream is exactly the pattern that earns a 429 or a block, and homelab
-  IPs have no headroom to absorb it. If platforms tighten, the network is pushed toward peer
-  replication, which weakens the derivation counts that make convergence observable. The
-  security model degrades gracefully but it does degrade.
-- **The whole identity model rests on ingest determinism.** If a platform stops being
-  reproducible — or was never reproducible, as may be true outside YouTube — then
-  recomputation stops working, quorum has nothing to agree on, and adopting a stranger's
-  edition becomes trust-on-first-use. The mitigation is that self-ingest and human-shared
-  links still need no trust; only stranger-edition adoption degrades, and it is optional.
+  recalled. Design moderation around refusing to serve, not around deletion.
+- **Platform rate limiting is the ceiling on "always pull from the platform."** Fifty instances
+  each pulling the same video upstream is exactly the pattern that earns a 429 or a block, and
+  homelab IPs have no headroom. When platforms push back, nodes fall to the infohash path, which
+  works — but only for content whose links carry an infohash, and only while somebody still
+  seeds it.
+- **If a platform serves different byte streams for the same URL, this design breaks.** Every
+  node lands in its own swarm, replication stops working for that platform, and the network
+  degenerates into unrelated instances that each downloaded the same video separately. This is
+  **accepted, not defended against.** Every available defence — corroboration, quorum,
+  reputation, adjudicating which edition is canonical — reintroduces exactly the trust machinery
+  this design exists without. If it happens at scale it is a bigger conversation about whether
+  the approach is viable, not a patch.
 - **A malicious operator is unavoidable and already assumed.** An operator controls their own
-  machine, so they can fabricate bytes directly — DNS spoofing or MITM of their own outbound
-  traffic buys them nothing extra. This is why provenance fields (§5) are diagnostic only and
-  never a security claim, and why verification must always run on the *verifier's* own network
-  path rather than being accepted as a reported result.
+  machine and can fabricate bytes directly; DNS spoofing or MITM of their own outbound traffic
+  buys them nothing extra. It also gains them nothing, because fabricated bytes have a different
+  infohash and no link points at it. This is why provenance fields (§5) are diagnostic only and
+  never a security claim.
 
 ---
 
