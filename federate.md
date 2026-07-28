@@ -280,6 +280,27 @@ Note also what the DHT can and cannot answer, since this is where a catalog gets
 is keyed **by** infohash and answers *"who has this,"* never *"what is this."* A node holding an
 infohash needs no lookup to use it; a node without one cannot obtain it from the network at all.
 
+### When a link names an infohash and the source is also up
+
+These can disagree: the link names `infohash_A`, the node derives `infohash_B` because the
+platform re-encoded. The acquisition rule governs what a node *stores*; it does not govern what
+a viewer *receives*, and conflating the two makes this look like a contradiction.
+
+The resolution order, from the one rule worth protecting — **never silently substitute**:
+
+1. **The link's infohash is a request for those exact bytes.** If they are obtainable — the node
+   holds them, or the swarm has seeders — serve them. This is what content addressing is for,
+   and the requester saw that content.
+2. **If they are not obtainable, the node does not pretend.** It may offer its own current
+   derivation, but as an explicitly different thing, marked as not the bytes the link named.
+   Silently serving `infohash_B` under a link that said `infohash_A` would forfeit the only
+   guarantee the identity model provides.
+3. **Deriving still happens regardless**, per the acquisition rule. It is the node's own ingest,
+   not an attempt to satisfy the link.
+
+The practical effect is that a shared link keeps meaning what it meant, and a video the platform
+has since re-encoded shows up as two editions rather than one silently swapped one.
+
 ### There is no canonical form
 
 > Determinism is what makes this section work; it is established under "Ingest is deterministic
@@ -317,6 +338,38 @@ no "produced once then copied, never recomputed" rule, no second replicated arti
 transcode CPU on the ingest path. Compatibility becomes something each node solves for its own
 viewers, at its own cost, however it likes.
 
+**The remux cache is a second copy, and it is budgeted separately.** A stream-copied mux is
+roughly the size of the streams it combines, so a 2 GB edition implies about 2 GB more on disk.
+That is not a hidden cost inside the pin quota:
+
+- **Pins are commitments to the network. Cache is local convenience.** They get separate
+  budgets, and the operator sees both.
+- **Cache evicts first, and aggressively.** It is regenerable from bytes the node already holds,
+  so losing it costs CPU, never content. A node under disk pressure empties cache entirely
+  before touching a single pin.
+- **Cache never counts as contributing.** It is not announced, not seeded, and not visible to
+  the replication floor in §8.
+
+An operator who would rather spend CPU than disk can run with no cache at all and mux per
+request; one serving mostly-compatible clients may need very little cache, since a client that
+can decode the raw streams needs no mux.
+
+### Cold-start playback while a fetch is in flight
+
+A viewer can ask for content the node doesn't hold yet. BitTorrent's rarest-first piece
+selection is what keeps a swarm healthy, but it means the local file has no usable prefix until
+completion — so a naive implementation would block playback until 100%.
+
+The split: **viewer-triggered fetches request pieces sequentially; background replication uses
+rarest-first.** Sequential mode is standard in torrent libraries, and the swarm-health cost is
+bounded because it applies only to fetches with someone actually waiting, which are a minority
+of transfers. Background pinning, the bulk of traffic, stays rarest-first.
+
+Until enough of a prefix exists, the viewer gets the progress page rather than a stalled player
+— machinery the project already has in `status.html` and the SSE progress endpoint, which was
+built for exactly this wait. This is the cold→warm transition in §7 with a swarm behind it
+instead of a platform.
+
 ### Ingest is deterministic by construction
 
 There is exactly one client consuming these platforms: **yt-dlp, configured by the gamtube
@@ -335,6 +388,14 @@ They are constants we choose.
   with no ffmpeg anywhere in the path.
 - **Never fall back.** If the pinned format is unavailable, the ingest *fails*. Silently
   selecting the next-best format is the single most likely way honest nodes would diverge.
+- **A canonical file tree.** BEP 52 places the file tree in the info dict, so names and order
+  feed the infohash directly — identical bytes under different filenames produce different
+  infohashes. yt-dlp emits dynamic extensions (`.m4a`, `.weba`, `.webm`, `.mp4`) that vary by
+  format and version, so the outputs are **renamed to fixed positional names before hashing**:
+  `0` for the video stream, `1` for the audio stream, no containing directory. Order is by
+  stream role, never by yt-dlp's output order. Note that Appendix A measured *payload* bytes,
+  not metainfo — this rule is unmeasured and is the most likely remaining source of silent
+  divergence between honest nodes.
 - **The JavaScript runtime is part of the pinned config.** Its presence changes which formats
   are visible at all — current yt-dlp warns that without one "some formats may be missing" —
   so the fleet standardises on it exactly as it does on the format id.
@@ -565,8 +626,12 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
 - **Format selection per platform** — which format id to pin. Now purely a question of what is
   worth replicating (quality against donated disk and upload), since playback compatibility is
   handled locally at serve time and no longer constrains the choice.
-- **Serve-time remux caching** — how long a muxed file is kept, and whether it's regenerated
-  per request or on first play. Pure local resource management, invisible to the protocol.
+- **Serve-time remux caching** — cache size defaults relative to pin quota, and whether a mux is
+  built on first play or per request. The *policy* is settled in §5 (separate budget, evicts
+  first, never counts as contributing); the numbers are not.
+- **Canonical file tree, verified** — the positional-naming rule in §5 is unmeasured. Building
+  torrents from identical streams on two yt-dlp versions and comparing infohashes is a cheap
+  test and it guards the most likely remaining source of silent divergence.
 - **Extraction budget** — how many upstream resolves a node performs per hour and how it backs
   off on 429, i.e. when it concludes the source is unavailable to it and falls to the infohash
   path. Needs real numbers from observed platform behaviour, not a guess.
