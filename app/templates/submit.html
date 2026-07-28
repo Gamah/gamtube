@@ -65,8 +65,10 @@ footer a { color: #aaa; }
 <p id="about">Paste any URL from YouTube, Instagram, TikTok, Facebook, or Twitter/X and get a clean, shareable link back. That's it.</p>
 <p id="privacy">No accounts. No cookies. No tracking. No ads. No algorithm. No notifications. No DMs. Just a video, and a link you can share with your friends outside social media's reach.</p>
 
-<form id="form">
-  <input type="url" id="url" placeholder="Paste video URL" required autofocus>
+<form id="form" autocomplete="off">
+  <input type="url" id="url" placeholder="Paste video URL" required autofocus
+         inputmode="url" autocomplete="off" autocorrect="off" autocapitalize="off"
+         spellcheck="false" data-1p-ignore data-lpignore="true" data-form-type="other">
   <button type="submit">Get link</button>
 </form>
 <a href="/scroll" id="scroll-btn">Bored? Scroll my curated list&hellip;</a>
