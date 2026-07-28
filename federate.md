@@ -59,6 +59,14 @@ what was served, and `URL → short_id → infohash` is king.** Nothing is proce
 or improved on the way in. Where playback convenience and the identity chain conflict, the
 identity chain wins and playback is solved locally (§5).
 
+**gamtube should die early.** It is not trying to become a platform, and a design that fails
+cleanly is preferred to one kept alive by accretion. Several decisions here are only defensible
+under that stance — no recovery path for a dead link, no catalog, no adjudication when nodes
+disagree, and a platform that serves inconsistent bytes simply breaking the design rather than
+being worked around. Each of those is somewhere a contributor could helpfully add resilience and
+in doing so rebuild the thing this deliberately isn't. When a change's justification is "so it
+keeps working in more cases," that is the signal to check it against this paragraph.
+
 **Videos are not guaranteed to work. That is the design, not a defect.** The network is a
 cache. The original source platform is unreliable cold storage behind it. A video that
 nobody keeps alive becomes unavailable, and a video whose source has also vanished is gone
@@ -272,12 +280,11 @@ Note also what the DHT can and cannot answer, since this is where a catalog gets
 is keyed **by** infohash and answers *"who has this,"* never *"what is this."* A node holding an
 infohash needs no lookup to use it; a node without one cannot obtain it from the network at all.
 
-Encoding rules and byte identity are **separate concerns**. Mandating an encoding profile does
-not produce identical bytes: encoder output is not bit-identical across ffmpeg/x264 versions,
-build flags, or thread counts, and container muxing adds its own drift. Determinism comes from
-the ingest config (below), never from the encoder.
-
 ### There is no canonical form
+
+> Determinism is what makes this section work; it is established under "Ingest is deterministic
+> by construction" below.
+
 
 **The network exists to replicate what was served.** An edition is exactly the bytes yt-dlp
 retrieved under the pinned config — verbatim, unprocessed, in whatever shape the platform
@@ -367,6 +374,11 @@ different bytes means the platform changed underneath.
 Provenance is diagnostic only, never a security claim, since it is self-reported (§12).
 
 ### Why nothing may be processed at ingest
+
+Encoding rules and byte identity are **separate concerns**. Mandating an encoding profile does
+not produce identical bytes: encoder output is not bit-identical across ffmpeg/x264 versions,
+build flags, or thread counts, and container muxing adds its own drift. Determinism comes from
+the ingest config, never from the encoder.
 
 A transcode is not reproducible; neither is a mux. Any ffmpeg step in the ingest path breaks
 `URL → infohash` for every node that runs a different build, which is all of them eventually.
@@ -572,6 +584,24 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
   the ruleset is open.
 - **Abandoned-swarm squatting** — tracking rogue nodes that seed their own file alongside a
   dying `short_id` (§4). Deferred, deliberately.
+- **Does `short_id` still earn its place, and what exactly does a link carry?** These are one
+  question, not two, and both are deferred.
+
+  With the catalog gone, `short_id` has lost its main job. What remains is a stable name for
+  "the video at this URL" across editions, plus instant duplicate detection at submit — and both
+  of those are satisfied by a purely *local* index key, derived from the URL, that never needs to
+  appear in the protocol.
+
+  The sharper problem: `short_id` is not invertible. A node handed only a `short_id`, whose swarm
+  is dead and whose source is alive, cannot recover the URL and therefore cannot re-derive — the
+  one recovery that ought to work. That suggests a link should carry **source URL + infohash**,
+  with `short_id` demoted to an implementation detail.
+
+  Settle that before specifying link format, since it determines what is being encoded. The
+  format decisions waiting behind it: fragment versus path (a `#` fragment never reaches the
+  server, so a node cannot log which edition a viewer asked for — material for an anti-tracking
+  project), encoding of a 64-hex-character v2 infohash (base32 ≈ 52 chars, base64url ≈ 43), and
+  what a link missing its infohash does — currently nothing, per §2.
 - **Home-instance-vouched tokens** — the later alternative to per-node registration.
 - **Relay fallback** — when it engages, who pays, how it's capped.
 
@@ -634,6 +664,11 @@ content — is what varies, driven by extraction capability and JavaScript-runti
 Explicitly not tested, and not to be implied: regional variance (single host, single IP),
 platform re-encoding over time (the 2005 video is near-maximally static), and any extractor
 other than YouTube.
+
+**The next test worth running**, and the cheapest attack on the assumption the whole design
+rests on: a second machine on a different network and in a different region deriving the same
+URL under the same pinned config. Regional variance is currently pure assumption in both
+directions — nothing here shows it exists, and nothing here shows it doesn't.
 
 ---
 
