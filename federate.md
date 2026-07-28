@@ -52,6 +52,11 @@ other with BitTorrent; viewers fetch over ordinary HTTP.
 
 It is not a tube platform, not a social network, and not an archive with guarantees.
 
+The governing principle, from which most of the rest follows: **the network exists to replicate
+what was served, and `URL → short_id → infohash` is king.** Nothing is processed, normalised,
+or improved on the way in. Where playback convenience and the identity chain conflict, the
+identity chain wins and playback is solved locally (§5).
+
 **Videos are not guaranteed to work. That is the design, not a defect.** The network is a
 cache. The original source platform is unreliable cold storage behind it. A video that
 nobody keeps alive becomes unavailable, and a video whose source has also vanished is gone
@@ -97,9 +102,9 @@ needed. It breaks three things that matter more:
 One `short_id` maps to N infohashes over time. Each is an **edition**. Editions are
 first-class in the protocol from day one — cheap now, impossible to retrofit.
 
-Editions arise from re-ingest (source re-fetched after the swarm died), re-canonicalisation
-(moving to a new codec years from now), and archival raw copies. A `short_id` on its own is
-not servable; resolving it to an edition is the *only* job it has.
+Editions arise from re-ingest (source re-fetched after the swarm died), a change to the pinned
+config, and the divergence exceptions in §5. A `short_id` on its own is not servable; resolving
+it to an edition is the *only* job it has.
 
 ### URL canonicalisation — protocol-level, rigid
 
@@ -125,7 +130,7 @@ Layer by rate of change, and never let a fast-changing signal into a slow-changi
 | catalog | `short_id` → source URL, edition list | DHT rendezvous + HTTP query | rarely |
 | liveness | who has this infohash right now | mainline DHT | per play |
 | bytes | the video itself, node↔node | BitTorrent | continuously |
-| playback | the video itself, node→viewer | HTTP range over progressive fMP4 | per play |
+| playback | the video itself, node→viewer | HTTP range over a locally-muxed file | per play |
 
 **Peer discovery is the mainline BitTorrent DHT, unapologetically.** It's large, proven,
 needs no bootstrap infrastructure from us, and keeps working if every gamtube instance goes
@@ -238,22 +243,38 @@ not produce identical bytes: encoder output is not bit-identical across ffmpeg/x
 build flags, or thread counts, and container muxing adds its own drift. Determinism comes from
 the ingest config (below), never from the encoder.
 
-### Canonical form — a derived rendition, not the identity
+### There is no canonical form
 
-The **raw download is the primary artifact**: it is what converges, what the infohash names,
-and what replicates. See "raw is the convergent artifact" below for why this is forced rather
-than chosen.
+**The network exists to replicate what was served.** An edition is exactly the bytes yt-dlp
+retrieved under the pinned config — verbatim, unprocessed, in whatever shape the platform
+delivered them. `URL → short_id → infohash` is the spine of the design, and nothing is allowed
+to bend it.
 
-Alongside it, a canonical **H.264 / AAC fragmented MP4** rendition exists for playback
-compatibility. H.264 plays on every browser, phone, and TV; AV1 and VP9 do not, and software
-AV1 decode on an older phone is a battery fire. For a product whose core action is "send a
-friend a link," that matters — but it is a *derived edition*, produced once by one node and
-then copied, never independently recomputed, because a transcode can never converge.
+Concretely, that means the edition is a **multi-file torrent** whenever the pinned format is
+DASH: a video-only stream and an audio-only stream, both raw CDN bytes. BitTorrent v2 handles
+multi-file torrents natively with per-file merkle trees, so this costs nothing.
 
-Costs to keep in view: generational quality loss from re-encoding VP9/AV1 sources, a larger
-file at equal quality, and encode CPU on hardware that is often an N100 or an old Xeon. Profile
-specifics remain open (§11), and whether every node needs the canonical rendition at all — as
-opposed to nodes serving raw to capable clients — is worth revisiting.
+We deliberately do *not* pin a progressive single-file format to make playback tidier. On
+YouTube the only combined-stream format observed in Appendix A's test was itag 18 — 240p for
+that video, and around 360p generally — so choosing it would trade most of the quality away to
+avoid a serve-time remux. Format selection is a decision about *what is worth replicating*,
+never about what is convenient to play.
+
+### Playback is a local concern, not a protocol concern
+
+The distinction that makes this work: **muxing at ingest destroys convergence; muxing at serve
+time is free.** Only replicated bytes are hashed.
+
+So a node serving a viewer may remux the two raw streams into a playable container (a stream
+copy — no re-encode, cheap), or transcode to H.264 for an older client that can't decode VP9 or
+AV1. That output is **local, cached, disposable, regenerable, never hashed, never announced,
+and never an edition.** Two nodes producing byte-different muxes of the same edition is fine,
+because nothing compares them.
+
+This removes the canonical rendition from the protocol entirely. There are no derived editions,
+no "produced once then copied, never recomputed" rule, no second replicated artifact, and no
+transcode CPU on the ingest path. Compatibility becomes something each node solves for its own
+viewers, at its own cost, however it likes.
 
 ### Ingest is deterministic by construction
 
@@ -307,17 +328,15 @@ every edition** so an exception can be diagnosed instead of guessed at: yt-dlp v
 id, player client, ingest timestamp, ingest region. Identical provenance that yields different
 bytes means the platform changed underneath; differing provenance disagreeing is expected.
 
-### Consequence: raw is the convergent artifact, canonical is derived
+### Why nothing may be processed at ingest
 
-A transcode is not reproducible, so a canonically-encoded artifact can never converge. For
-`URL → infohash` to be derivable at all, the **primary replicated artifact is the raw
-download**, and the H.264 rendition is a *derived edition* — produced once, then copied, never
-recomputed.
+A transcode is not reproducible; neither is a mux. Any ffmpeg step in the ingest path breaks
+`URL → infohash` for every node that runs a different build, which is all of them eventually.
 
-This reverses the earlier default of transcoding at ingest, and makes the raw edition
-mandatory on ingesting nodes rather than archival-only. The canonical rendition still exists
-for playback compatibility (§5 above); it is simply no longer what the network identifies
-content by.
+So the rule is absolute rather than a default: **ffmpeg never touches a replicated artifact.**
+This reverses the project's current `TRANSCODE_ENABLED` behaviour, where transcoding at ingest
+is a supported option — under federation it cannot be, because the resulting bytes could never
+converge with anyone else's.
 
 ### Edition churn is self-cleaning
 
@@ -435,7 +454,8 @@ the `/scroll` feed) are already operator-pinned content under a different name.
 | `app/ids.py` | `short_id_for()` already is the work identifier. Gains URL canonicalisation before hashing. |
 | `app/models.py` | `Video` gains edition linkage; a new `Edition` table (infohash, profile, size, created_at) replaces the single `video_path` / `file_size_bytes` pair. |
 | `app/pipeline/worker.py` | `process_video` becomes ingest-or-replicate. `reencode_video` becomes edition minting. |
-| `app/pipeline/downloader.py` | Pinned-format, no-remux ingest. |
+| `app/pipeline/downloader.py` | Pinned-format, no-remux ingest; never falls back to another format. |
+| `app/pipeline/transcoder.py` | Moves off the ingest path entirely. Becomes serve-time remux/transcode into a local disposable cache — `TRANSCODE_ENABLED=true` is incompatible with federation. |
 | `app/storage/base.py` | The `StorageBackend` ABC is the right seam for a torrent-backed backend; `get_local_path()` already exists for handing files to a seeder. |
 | `app/routers/videos.py` | The `expired` → re-enqueue path is already cold→warm resurrection — extend, don't rebuild. |
 
@@ -455,7 +475,7 @@ DHT, expose magnet links alongside the existing `/v/{id}` links.
 *Broken:* no second node, no federation, nothing replicates.
 
 **2. Editions in the data model.** Infohash column, `Edition` table, URL canonicalisation,
-links carrying both ids, canonical profile at ingest.
+links carrying both ids, multi-file editions, no ffmpeg in the ingest path.
 *Proves:* the identity model survives contact with the existing schema.
 *Broken:* editions still only ever have one member.
 
@@ -464,12 +484,14 @@ of re-downloading from source.
 *Proves:* ingest-once-replicate-bytes.
 *Broken:* discovery is manual — you tell node B the infohash by hand.
 
-**4. HTTP delivery with verification.** Progressive fMP4 over byte-range requests — no HLS,
-because a single rendition needs no ABR ladder and ranges map cleanly onto merkle boundaries.
-Per-block hash check in a service worker against the v2 tree, multi-node range fetch with
-mid-stream failover.
+**4. HTTP delivery with verification.** Serve-time remux of the raw streams into a playable
+file, cached locally. Byte-range requests over that — no HLS, since there is no ABR ladder and
+ranges map cleanly onto merkle boundaries. Per-block hash check in a service worker against the
+v2 tree of the *raw* streams, multi-node range fetch with mid-stream failover.
 *Proves:* the browser leg, including that a serving node can't substitute bytes.
-*Broken:* still no automatic node discovery.
+*Broken:* still no automatic node discovery. Note the verification boundary — a viewer can
+verify raw stream bytes, but a locally-muxed file is by definition unverifiable, so the check
+belongs on the fetch path rather than the playback path.
 
 **5. DHT rendezvous.** Announce and resolve on `catalog_target`, pre-ingest lookup by
 `short_id`, HTTP edition-list exchange, re-announce loop, sampled recomputation check before
@@ -487,8 +509,11 @@ warm/cold/gone surfaced in the player.
 
 Deliberately unresolved. Each needs a decision before the phase that depends on it.
 
-- **Canonical profile specifics** — codec profile and level, fragment duration, resolution
-  ceiling. A ceiling makes donated disk go further but bakes a lossy choice into ingest.
+- **Format selection per platform** — which format id to pin. Now purely a question of what is
+  worth replicating (quality against donated disk and upload), since playback compatibility is
+  handled locally at serve time and no longer constrains the choice.
+- **Serve-time remux caching** — how long a muxed file is kept, and whether it's regenerated
+  per request or on first play. Pure local resource management, invisible to the protocol.
 - **BitTorrent v2 (BEP 52) is now close to mandatory,** not optional — sampled verification
   (§4) depends on 16 KiB merkle leaves, and v1's SHA-1 is weak against deliberate collisions.
   The open part is client and library support for v2 in whatever torrent stack we embed.
