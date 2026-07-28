@@ -266,7 +266,11 @@ python run.py
 sudo bash deploy.sh --domain your.domain.tld
 ```
 
-Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers a systemd service. Prompts for: data directory, admin password, and whether to enable transcoding. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service. Use `--keep` to skip all prompts and reuse existing `.env` values.
+Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers a systemd service. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
+
+Prompts for public base URL, data directory, admin password, transcoding, and video TTL. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** — a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` skips the prompts entirely; `--domain`/`--port`/`--data-dir` override non-interactively.
+
+The base URL prompt takes a full URL including scheme, because `MEDIA_BASE_URL` is derived from it (`{BASE_URL}/media`) and an `http://` value on an HTTPS site gets every video blocked as mixed content. `--domain` only ever produces `http://`; type the URL at the prompt for HTTPS.
 
 ```bash
 systemctl status gamtube

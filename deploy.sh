@@ -1,12 +1,18 @@
 #!/usr/bin/env bash
 # deploy.sh — bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
-# Usage: sudo bash deploy.sh [--domain example.com] [--keep]
-#   --keep  skip all prompts; reuse data-dir and password from existing .env
+# Usage: sudo bash deploy.sh [--domain example.com] [--port 8000] [--data-dir DIR] [--keep]
+#
+# Interactive by default: every setting is prompted with the value from the
+# existing /opt/gamtube/.env as its default, so pressing enter keeps it.
+#   --keep  skip all prompts entirely; reuse every existing value verbatim
+# On a re-run, nothing is ever silently reset — a setting only changes if you
+# type a new value or pass a flag.
 set -euo pipefail
 
 GAMTUBE_DIR="$(cd "$(dirname "$0")" && pwd)"
 GAMTUBE_USER="${GAMTUBE_USER:-gamtube}"
 DOMAIN="localhost"
+DOMAIN_EXPLICIT=false
 PORT=8000
 PORT_EXPLICIT=false
 DATA_DIR=""
@@ -17,7 +23,7 @@ TRANSCODE_ENABLED="false"
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
   case $1 in
-    --domain)   DOMAIN="$2";   shift 2 ;;
+    --domain)   DOMAIN="$2"; DOMAIN_EXPLICIT=true; shift 2 ;;
     --port)     PORT="$2"; PORT_EXPLICIT=true; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
     --keep)     KEEP=true; shift ;;
@@ -25,47 +31,93 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-# --- --keep: pull existing values, skip prompts ---
-if [[ "$KEEP" == "true" ]]; then
-  if [[ ! -f "$DEPLOY_DIR/.env" ]]; then
-    echo "Error: --keep requires an existing deployment at $DEPLOY_DIR/.env"
-    exit 1
+# --- read a key out of the existing .env, empty if absent ---
+_env_get() {
+  [[ -f "$DEPLOY_DIR/.env" ]] || return 0
+  grep -E "^$1=" "$DEPLOY_DIR/.env" 2>/dev/null | tail -n1 | cut -d= -f2- || true
+}
+
+# --- existing deployment values; these are the defaults for every prompt ---
+EX_BASE_URL="$(_env_get BASE_URL)"
+EX_MEDIA_ROOT="$(_env_get MEDIA_ROOT)"
+EX_DATA_DIR="${EX_MEDIA_ROOT%/media}"
+EX_ADMIN_PASSWORD="$(_env_get ADMIN_PASSWORD)"
+EX_TRANSCODE="$(_env_get TRANSCODE_ENABLED)"
+EX_TTL="$(_env_get VIDEO_TTL_HOURS)"
+EX_TEMP_DIR="$(_env_get TEMP_DIR)"
+
+# --- listen port lives in the systemd unit, not .env ---
+if [[ "$PORT_EXPLICIT" != "true" ]]; then
+  EX_PORT="$(grep -oE '\-\-port [0-9]+' /etc/systemd/system/gamtube.service 2>/dev/null | tail -n1 | grep -oE '[0-9]+' || true)"
+  [[ -n "$EX_PORT" ]] && PORT="$EX_PORT"
+fi
+
+# --- base URL: --domain/--port win; else prompt; else keep existing ---
+if [[ "$DOMAIN_EXPLICIT" == "true" || "$PORT_EXPLICIT" == "true" ]]; then
+  BASE_URL="http://$DOMAIN"
+  if [[ "$PORT_EXPLICIT" == "true" && "$PORT" != "80" && "$PORT" != "443" ]]; then
+    BASE_URL="http://$DOMAIN:$PORT"
   fi
-  if [[ -z "$DATA_DIR" ]]; then
-    _existing_media="$(grep -E '^MEDIA_ROOT=' "$DEPLOY_DIR/.env" | cut -d= -f2-)"
-    DATA_DIR="${_existing_media%/media}"
-    [[ -z "$DATA_DIR" ]] && { echo "Error: cannot read DATA_DIR from existing .env"; exit 1; }
-  fi
-  ADMIN_PASSWORD="$(grep -E '^ADMIN_PASSWORD=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)"
-  TRANSCODE_ENABLED="$(grep -E '^TRANSCODE_ENABLED=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || echo "false")"
 else
-  # --- prompt for data dir if not supplied ---
-  if [[ -z "$DATA_DIR" ]]; then
-    read -rp "Data directory [/var/lib/gamtube]: " _data_input
-    DATA_DIR="${_data_input:-/var/lib/gamtube}"
+  BASE_URL="${EX_BASE_URL:-http://localhost:8000}"
+fi
+
+# --- defaults for everything else ---
+DATA_DIR="${DATA_DIR:-${EX_DATA_DIR:-/var/lib/gamtube}}"
+ADMIN_PASSWORD="$EX_ADMIN_PASSWORD"
+TRANSCODE_ENABLED="${EX_TRANSCODE:-false}"
+VIDEO_TTL_HOURS="${EX_TTL:-24}"
+TEMP_DIR="${EX_TEMP_DIR:-/tmp}"
+
+# --- prompt for each value; blank keeps the shown default ---
+if [[ "$KEEP" != "true" ]]; then
+  if [[ ! -f "$DEPLOY_DIR/.env" ]]; then
+    echo "==> No existing deployment found; press enter to accept each default."
+  else
+    echo "==> Existing deployment found; press enter to keep each current value."
   fi
 
-  # --- prompt for admin password ---
-  _existing_admin_pw=""
-  if [[ -f "$DEPLOY_DIR/.env" ]]; then
-    _existing_admin_pw="$(grep -E '^ADMIN_PASSWORD=' "$DEPLOY_DIR/.env" 2>/dev/null | cut -d= -f2- || true)"
+  if [[ "$DOMAIN_EXPLICIT" != "true" && "$PORT_EXPLICIT" != "true" ]]; then
+    read -rp "Public base URL, including scheme [$BASE_URL]: " _input
+    BASE_URL="${_input:-$BASE_URL}"
   fi
-  if [[ -n "$_existing_admin_pw" ]]; then
-    read -rsp "Admin password for /manage [leave blank to keep existing]: " _admin_pw_input
+  BASE_URL="${BASE_URL%/}"
+
+  read -rp "Data directory [$DATA_DIR]: " _input
+  DATA_DIR="${_input:-$DATA_DIR}"
+
+  if [[ -n "$ADMIN_PASSWORD" ]]; then
+    read -rsp "Admin password for /manage [blank = keep existing]: " _input
     echo
-    ADMIN_PASSWORD="${_admin_pw_input:-$_existing_admin_pw}"
+    ADMIN_PASSWORD="${_input:-$ADMIN_PASSWORD}"
   else
-    read -rsp "Admin password for /manage (blank = panel disabled): " _admin_pw_input
+    read -rsp "Admin password for /manage (blank = panel disabled): " _input
     echo
-    ADMIN_PASSWORD="$_admin_pw_input"
+    ADMIN_PASSWORD="$_input"
   fi
 
-  read -rp "Re-encode downloads to H.264 MP4? Slower but guarantees browser compatibility [y/N]: " _transcode_input
-  if [[ "$_transcode_input" =~ ^[Yy] ]]; then
-    TRANSCODE_ENABLED="true"
-  else
-    TRANSCODE_ENABLED="false"
+  _transcode_hint="y/N"
+  [[ "$TRANSCODE_ENABLED" == "true" ]] && _transcode_hint="Y/n"
+  read -rp "Re-encode downloads to H.264 MP4? Slower but guarantees browser compatibility [$_transcode_hint]: " _input
+  if [[ -n "$_input" ]]; then
+    if [[ "$_input" =~ ^[Yy] ]]; then TRANSCODE_ENABLED="true"; else TRANSCODE_ENABLED="false"; fi
   fi
+
+  read -rp "Hours until a video expires, 0 = never [$VIDEO_TTL_HOURS]: " _input
+  VIDEO_TTL_HOURS="${_input:-$VIDEO_TTL_HOURS}"
+fi
+
+if [[ ! "$VIDEO_TTL_HOURS" =~ ^[0-9]+$ ]]; then
+  echo "Error: VIDEO_TTL_HOURS must be a whole number, got '$VIDEO_TTL_HOURS'"
+  exit 1
+fi
+if [[ ! "$BASE_URL" =~ ^https?:// ]]; then
+  echo "Error: base URL must start with http:// or https://, got '$BASE_URL'"
+  exit 1
+fi
+if [[ "$KEEP" == "true" && ! -f "$DEPLOY_DIR/.env" ]]; then
+  echo "Error: --keep requires an existing deployment at $DEPLOY_DIR/.env"
+  exit 1
 fi
 
 echo "==> Installing system dependencies"
@@ -102,19 +154,15 @@ python3.12 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
 "$VENV/bin/pip" install --quiet -r "$DEPLOY_DIR/requirements.txt"
 
-echo "==> Writing .env"
-BASE_URL="http://$DOMAIN"
-if [[ "$PORT_EXPLICIT" == "true" && "$PORT" != "80" && "$PORT" != "443" ]]; then
-  BASE_URL="http://$DOMAIN:$PORT"
-fi
-
+echo "==> Writing .env (BASE_URL=$BASE_URL)"
 cat > "$DEPLOY_DIR/.env" <<EOF
 DATABASE_URL=sqlite:///$DATA_DIR/gamtube.db
 MEDIA_ROOT=$MEDIA_DIR
 MEDIA_BASE_URL=$BASE_URL/media
 STORAGE_BACKEND=local
 BASE_URL=$BASE_URL
-TEMP_DIR=/tmp
+TEMP_DIR=$TEMP_DIR
+VIDEO_TTL_HOURS=$VIDEO_TTL_HOURS
 TRANSCODE_ENABLED=$TRANSCODE_ENABLED
 ADMIN_PASSWORD=$ADMIN_PASSWORD
 EOF
