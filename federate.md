@@ -1,7 +1,9 @@
 # gamtube federation
 
 **Status:** design document. Nothing here is implemented.
-**Date:** 2026-07-28.
+**Date:** 2026-07-28. Revised the same day after external review — the catalog discovery
+mechanism, the delivery/verification pairing, and the pin policy all changed. Protocol
+citations below are now read from the BEPs directly rather than recalled.
 
 This describes turning gamtube from a single-server re-hoster into a federation of
 self-hosted nodes that replicate video between themselves over BitTorrent and serve it to
@@ -120,10 +122,10 @@ Layer by rate of change, and never let a fast-changing signal into a slow-changi
 
 | layer | carries | mechanism | changes |
 |---|---|---|---|
-| catalog | `short_id` → source URL, edition list | signed mutable DHT record | rarely |
+| catalog | `short_id` → source URL, edition list | DHT rendezvous + HTTP query | rarely |
 | liveness | who has this infohash right now | mainline DHT | per play |
 | bytes | the video itself, node↔node | BitTorrent | continuously |
-| playback | the video itself, node→viewer | HTTP range / HLS | per play |
+| playback | the video itself, node→viewer | HTTP range over progressive fMP4 | per play |
 
 **Peer discovery is the mainline BitTorrent DHT, unapologetically.** It's large, proven,
 needs no bootstrap infrastructure from us, and keeps working if every gamtube instance goes
@@ -149,24 +151,74 @@ No ActivityPub, no follow graph, no signed instance feeds, no inbox/outbox. Inst
 independent. The link is the entry.
 
 What federation would have bought us — avoiding duplicate ingest, and propagating edition
-updates so old links don't die — is bought instead by putting a small signed record in the
-DHT, keyed by `short_id`, containing the source URL and the current edition list. Same
-benefit, no new protocol, using infrastructure we're already joining. Records decay unless
-republished, which is on-thesis: content nobody keeps alive stops being resolvable.
+updates so old links don't die — is bought instead by using the DHT as a **rendezvous**, not
+as a datastore. A node holding an edition of `short_id` announces itself under a synthetic
+target:
 
-`[SOURCE]` The mutable-record mechanism is BEP 44. Its size limit and republish interval must
-be read from the BEP directly before any numbers are written into an implementation — they
-are not recorded here from memory.
+```
+catalog_target = SHA1("gamtube:catalog:v1:" + short_id)     # 20 bytes
+```
 
-### The record is self-validating
+`announce_peer` on that target, `get_peers` to resolve it. The result is a list of nodes that
+claim to know this `short_id`; you then ask them over HTTP for the edition list.
 
-`short_id` → source URL is not invertible, so an instance handed a `short_id` it didn't
-ingest cannot know where to re-fetch from. The source URL therefore travels *inside* the
-record.
+Verified against BEP 5: `get_peers`/`announce_peer` take an arbitrary 20-byte value as
+`info_hash`, and nothing in the spec requires it to correspond to a real torrent — "the
+queried node should store the IP address of the querying node and the supplied port number
+under the infohash in its store of peer contact information." BEP 5 specifies no TTL for
+announced peer records, so expiry is implementation-defined and nodes must re-announce
+periodically, which BitTorrent clients already do.
 
-Nice property: the record is keyed by `short_id`, so any reader can check
-`SHA256(canonical(record.source_url))[:12] == key`. A record physically cannot lie about
-which URL it describes, with no signature needed for that field.
+**Why not BEP 44,** recorded so it isn't re-proposed. An earlier draft put a signed mutable
+record in the DHT keyed by `short_id`. That cannot work: per BEP 44 a mutable item's target is
+"the SHA-1 hash of the public key (as it appears in the put message)" plus the salt if
+present. A reader therefore needs the *publisher's Ed25519 public key* to compute the target,
+and cannot derive it from a URL. With no federation graph there is nothing to distribute those
+keys, and a shared keypair would let anyone overwrite the catalog. The salt cap (64 bytes) and
+value cap (1000 bytes bencoded) are real but incidental — the addressing is the blocker.
+
+Rendezvous also removes the size ceiling: the edition list is fetched over HTTP, not squeezed
+into a 1000-byte DHT value.
+
+Records still decay. A node that stops re-announcing stops being discoverable, and a
+`short_id` nobody holds stops resolving. That is on-thesis.
+
+### Verification is recomputation
+
+`short_id` → source URL is not invertible, so an instance handed a `short_id` it didn't ingest
+cannot know where to re-fetch from. The source URL therefore travels inside the catalog
+answer, and that much is self-validating: any reader checks
+`SHA256(canonical(answer.source_url))[:12] == short_id`. An answer cannot lie about which URL
+it describes.
+
+The infohash attached to it is a different matter, and the answer is **not** a trust graph.
+Because ingest is deterministic (§5), the binding from URL to bytes to infohash is
+*reproducible*, so **anyone can verify it by recomputing it.** No signatures, no identity, no
+allowlist, no reputation. Nodes stay anonymous because nothing depends on who they are — only
+on whether the bytes they advertise are the bytes the pinned config yields for that URL.
+
+This is the footing reproducible builds stand on. It is not a proof you can hand a third party
+— you cannot demonstrate to someone else what the platform served you without trusting your
+report — but it is something every participant can check for themselves, which is what
+actually matters here.
+
+**Full verification costs as much as ingest**, so it is made cheap by sampling. With BitTorrent
+v2 the merkle tree has 16 KiB leaf blocks (BEP 52: "the root hash of a merkle tree with a
+branching factor of 2, constructed from 16KiB blocks of the file", SHA2-256), so a verifier can
+range-request a random sample of blocks directly from the source CDN, hash them, and check them
+against the tree. A few hundred KiB gives high confidence about a multi-hundred-MB file.
+Substituting actual video content changes a large fraction of blocks and is caught; altering a
+single block is not a useful attack against a media file. This is why v2 infohashes are close
+to mandatory rather than optional here — see §11.
+
+**Quorum is a cheap signal, not the foundation.** k nodes on independent network paths
+advertising the same infohash is corroboration a verifier gets for free, and disagreement is
+the flag worth surfacing — it means a regional difference, a platform re-encode, or a lying
+node. But the security property is recomputation; quorum only saves you the trouble.
+
+**What cannot be verified:** cold content whose source has gone. There is nothing to recompute
+against, so an edition of a dead URL is trust-on-first-use or nothing. That is an honest limit,
+and it is the same limit that makes such content unrecoverable in the first place (§7).
 
 This publishes source URLs to the public DHT. Consistent with the mainline decision above.
 
@@ -176,45 +228,113 @@ This publishes source URLs to the public DHT. Consistent with the mainline decis
 
 ### Ingest once, replicate bytes — never recompute
 
-Before ingesting, an instance looks up `short_id` in the DHT. If an edition already exists,
-it replicates those exact bytes over BitTorrent instead of re-downloading from the source.
+Before ingesting, an instance looks up `short_id` in the DHT. If an edition already exists, it
+replicates those exact bytes over BitTorrent instead of re-downloading from the source. This is
+a bandwidth optimisation, not a correctness requirement — re-ingesting is always a valid
+alternative, and under deterministic ingest it usually lands on the same infohash anyway.
 
-This rule is **separate from** the canonical-encoding rule below, and neither substitutes for
-the other. Mandating an encoding profile does not produce identical bytes: encoder output is
-not bit-identical across ffmpeg/x264 versions, build flags, or thread counts, and container
-muxing adds its own drift. Two nodes running the identical profile on the identical source
-still produce two infohashes and two disjoint swarms. Only ingest-once produces one swarm.
+Encoding rules and byte identity are **separate concerns**. Mandating an encoding profile does
+not produce identical bytes: encoder output is not bit-identical across ffmpeg/x264 versions,
+build flags, or thread counts, and container muxing adds its own drift. Determinism comes from
+the ingest config (below), never from the encoder.
 
-### Canonical form — penciled in, open to revision
+### Canonical form — a derived rendition, not the identity
 
-Every federated video is normalised at ingest to **H.264 / AAC in fragmented MP4**, with a
-pinned profile.
+The **raw download is the primary artifact**: it is what converges, what the infohash names,
+and what replicates. See "raw is the convergent artifact" below for why this is forced rather
+than chosen.
 
-The argument is universal playback. H.264 plays on every browser, phone, and TV; AV1 and VP9
-do not, and software AV1 decode on an older phone is a battery fire. For a product whose core
-action is "send a friend a link," that outweighs the costs — which are real: generational
-quality loss from re-encoding VP9/AV1 sources, a larger file at equal quality (so volunteers
-donate more disk and upload for a worse-looking video), and encode CPU on hardware that is
-often an N100 or an old Xeon.
+Alongside it, a canonical **H.264 / AAC fragmented MP4** rendition exists for playback
+compatibility. H.264 plays on every browser, phone, and TV; AV1 and VP9 do not, and software
+AV1 decode on an older phone is a battery fire. For a product whose core action is "send a
+friend a link," that matters — but it is a *derived edition*, produced once by one node and
+then copied, never independently recomputed, because a transcode can never converge.
 
-This is the decision most likely to change. The profile specifics are open (§11).
+Costs to keep in view: generational quality loss from re-encoding VP9/AV1 sources, a larger
+file at equal quality, and encode CPU on hardware that is often an N100 or an old Xeon. Profile
+specifics remain open (§11), and whether every node needs the canonical rendition at all — as
+opposed to nodes serving raw to capable clients — is worth revisiting.
 
-### Reproducible ingest is not a viable path
+### Ingest is deterministic by construction
 
-Worth recording so it isn't re-proposed. Some nondeterminism is removable: pin an exact
-format id rather than `bestvideo+bestaudio/best`, disable metadata and thumbnail embedding,
-and avoid the ffmpeg merge step entirely by fetching a single progressive file or storing
-video and audio streams unmerged — those bytes are exactly what the CDN served.
+There is exactly one client consuming these platforms: **yt-dlp, configured by the gamtube
+server.** The configuration is ours and uniform across the fleet, so the usual sources of
+byte variance — client fingerprint, format preference, container handling — are not variables.
+They are constants we choose.
 
-What is not removable is that the platform can change what it serves. Formats appear and
-disappear, and platforms re-encode their own renditions server-side, with no notification.
-`[SOURCE]` — that is read from observed platform behaviour, not a documented contract; check
-yt-dlp's issue tracker before building on it.
+**Pinned by the protocol,** not left to the implementation:
 
-So determinism is achievable between instances ingesting around the same time, and not across
-months. It is also mutually exclusive with the canonical rendition, since transcoding is
-inherently non-reproducible. Convergence comes from the pre-ingest lookup, not from
-reproducibility.
+- An explicit format id per platform. Never `bestvideo+bestaudio/best`.
+- The yt-dlp player client, pinned explicitly. `[SOURCE]` yt-dlp selects among several player
+  clients internally and its defaults shift between releases; confirm the exact extractor-arg
+  against yt-dlp's documentation before use.
+- No remux, no metadata embedding, no thumbnail embedding. Fetch a single progressive file, or
+  store the video and audio streams unmerged — those bytes are exactly what the CDN served,
+  with no ffmpeg anywhere in the path.
+- **Never fall back.** If the pinned format is unavailable, the ingest *fails*. Silently
+  selecting the next-best format is the single most likely way honest nodes would diverge.
+- **The JavaScript runtime is part of the pinned config.** Its presence changes which formats
+  are visible at all — current yt-dlp warns that without one "some formats may be missing" —
+  so the fleet standardises on it exactly as it does on the format id.
+- **Deterministic torrent creation:** fixed piece length, fixed info-dict field set, canonical
+  file naming, no `creation date` and no `created by`. This makes the infohash a pure function
+  of the bytes.
+
+With that config fixed, two nodes handed the same URL derive **the same infohash**.
+Convergence is the expected outcome, not a lucky one — measured, not assumed; see Appendix A.
+
+Version skew across the fleet is not a source of byte divergence once the format id and player
+client are explicit. The version governs extraction *ability*, not the bytes of a named
+format, and this was measured: two yt-dlp releases nine months apart produced byte-identical
+output for every format tested. Where the older release could not cope with a modern video it
+returned HTTP 403 and produced nothing. **Version skew fails closed** — a node that cannot
+extract mints no edition rather than a wrong one.
+
+**Three exceptions remain, and they are the entire reason editions exist:**
+
+1. **Region** — format availability and access differ geographically regardless of client.
+2. **Platform re-encoding** — a platform regenerating a rendition changes the bytes for
+   everyone, silently. `[SOURCE]`, observed behaviour rather than documented.
+3. **Format withdrawal** — a pinned format id can cease to exist. Because there is no
+   fallback, this fails the ingest rather than diverging it, and is resolved by changing the
+   pinned config, which mints a new edition on purpose rather than by accident.
+
+Note what is *not* on this list: node identity, node honesty, and node acquaintance. A node
+that lies about what the platform served it produces bytes that fail recomputation (§4).
+
+Divergence is therefore the exception path, not the normal one. **Provenance travels with
+every edition** so an exception can be diagnosed instead of guessed at: yt-dlp version, format
+id, player client, ingest timestamp, ingest region. Identical provenance that yields different
+bytes means the platform changed underneath; differing provenance disagreeing is expected.
+
+### Consequence: raw is the convergent artifact, canonical is derived
+
+A transcode is not reproducible, so a canonically-encoded artifact can never converge. For
+`URL → infohash` to be derivable at all, the **primary replicated artifact is the raw
+download**, and the H.264 rendition is a *derived edition* — produced once, then copied, never
+recomputed.
+
+This reverses the earlier default of transcoding at ingest, and makes the raw edition
+mandatory on ingesting nodes rather than archival-only. The canonical rendition still exists
+for playback compatibility (§5 above); it is simply no longer what the network identifies
+content by.
+
+### Edition churn is self-cleaning
+
+When gamtube changes its pinned config — a new format id, a new player client — the same URL
+starts yielding different bytes and therefore a new infohash. **This needs no migration and no
+arbitration.** Old editions stop being ingested, stop being liked, lose their seeders, and fall
+off disk and out of the network. The network drifts onto whatever the current config produces
+because that is what new ingests produce.
+
+So there is deliberately no edition-reconciliation machinery: no canonical-edition election, no
+version negotiation, no rewriting of old records. Obsolete editions are garbage collected by
+disinterest.
+
+The one visible cost: a link that named a specific infohash breaks when that edition dies. It
+degrades gracefully rather than dead-ending, because the link also carries `short_id` — the
+receiving instance re-ingests under the current config and mints a fresh edition. That is the
+cold→warm path in §7 doing its job.
 
 ---
 
@@ -273,12 +393,27 @@ button. A shared link that dead-ends silently is what would kill this by word of
 
 ## 8. Pin economics
 
-A "like" pins the video to **the liker's own instance** for 24 hours, drawn against a
-per-user pin budget, within a total the operator has consented to donate.
+A "like" pins the video to **the liker's own instance**, drawn against a per-user pin budget,
+within a total the operator has consented to donate.
 
 The important detail is that a like never causes a write on someone else's disk. There is no
 cross-instance griefing vector, the cost lands on storage the operator opted into, and a
 finite budget makes "keep this alive" a decision rather than a reflex.
+
+**Retention is capacity-bound LRU, not a flat TTL.** A fixed 24-hour pin looks reasonable and
+fails badly: everyone who likes a video during its viral hour has their pin expire during the
+same hour a day later, so seed count falls off a cliff rather than decaying. Correlated
+expiry is how a swarm dies all at once.
+
+Instead: the operator donates a capacity, and pins are evicted least-recently-used when it
+fills. Three refinements on top —
+
+- **Jitter** any time component so nothing expires in lockstep.
+- **Replication floor before eviction.** Before dropping an edition, check swarm size via the
+  DHT; if evicting would take it below a floor, keep it and evict the next candidate instead.
+  This costs one DHT lookup and directly counters the cliff.
+- **Repeated likes extend rather than duplicate**, so sustained interest keeps something warm
+  without consuming more budget than it needs.
 
 Replication then emerges without a central scheduler: popular content lands on many instances
 and plays instantly; niche content lives on one and plays slowly; an archivist runs a curator
@@ -329,14 +464,17 @@ of re-downloading from source.
 *Proves:* ingest-once-replicate-bytes.
 *Broken:* discovery is manual — you tell node B the infohash by hand.
 
-**4. HTTP delivery with verification.** Signed manifest, per-segment hash check in a service
-worker, multi-node range fetch with mid-stream failover.
-*Proves:* the browser leg, including that a malicious node can't substitute bytes.
+**4. HTTP delivery with verification.** Progressive fMP4 over byte-range requests — no HLS,
+because a single rendition needs no ABR ladder and ranges map cleanly onto merkle boundaries.
+Per-block hash check in a service worker against the v2 tree, multi-node range fetch with
+mid-stream failover.
+*Proves:* the browser leg, including that a serving node can't substitute bytes.
 *Broken:* still no automatic node discovery.
 
-**5. DHT catalog records.** Pre-ingest lookup by `short_id`, edition-update propagation,
-republish loop.
-*Proves:* convergence without a federation protocol.
+**5. DHT rendezvous.** Announce and resolve on `catalog_target`, pre-ingest lookup by
+`short_id`, HTTP edition-list exchange, re-announce loop, sampled recomputation check before
+adopting a stranger's edition.
+*Proves:* convergence and permissionless verification without a federation protocol.
 *Broken:* no accounts, so no pin budgets.
 
 **6. Accounts, pin budgets, availability UI.** Per-node registration, like-to-pin,
@@ -351,13 +489,17 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
 
 - **Canonical profile specifics** — codec profile and level, fragment duration, resolution
   ceiling. A ceiling makes donated disk go further but bakes a lossy choice into ingest.
-- **Raw edition retention** — declined as a default (double storage). Archival-nodes-only is
-  the compromise on the table, and it's what would let a future re-canonicalisation avoid
-  generational loss.
-- **BEP 44 record size limit and republish interval** — read from the BEP, do not assume.
-- **BitTorrent v2 (BEP 52, SHA-256 merkle trees) vs v1 (SHA-1)** — v2's per-block merkle
-  proofs fit segment verification well and SHA-1 is weak against deliberate collisions, but
-  v2 client support is narrower. Verify current support before committing.
+- **BitTorrent v2 (BEP 52) is now close to mandatory,** not optional — sampled verification
+  (§4) depends on 16 KiB merkle leaves, and v1's SHA-1 is weak against deliberate collisions.
+  The open part is client and library support for v2 in whatever torrent stack we embed.
+  Verify before committing; a v1 fallback loses cheap verification entirely.
+- **Sampling parameters** — how many blocks, chosen how, and what confidence that yields
+  against an adversary willing to alter a minority of the file.
+- **Whether platforms other than YouTube are deterministic at all.** Appendix A tests YouTube
+  only. Instagram and TikTok re-encode far more aggressively and may not converge; if they
+  don't, they fall back to copy-the-bytes with no recomputation check available.
+- **Regional divergence in practice** — untested. If two regions routinely yield different
+  bytes for the same format id, quorum weakens to per-region quorum.
 - **URL canonicalisation ruleset** — per-platform rules, tracking-param stripping, and whether
   it's versioned so it can ever change without renaming the catalog. The *requirement* is
   locked; the ruleset is open.
@@ -380,9 +522,39 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
 - **DHT announces are public and permanent.** Anything that reaches a second seeder cannot be
   recalled. Design moderation around removing catalog records and refusing to serve, not around
   deletion.
-- **Byte verification only covers the payload.** BitTorrent proves the bytes match the
-  infohash; it cannot prove the infohash is the video the catalog promised. That binding needs
-  signing regardless of transport.
+- **The whole identity model rests on ingest determinism.** If a platform stops being
+  reproducible — or was never reproducible, as may be true outside YouTube — then
+  recomputation stops working, quorum has nothing to agree on, and adopting a stranger's
+  edition becomes trust-on-first-use. The mitigation is that self-ingest and human-shared
+  links still need no trust; only stranger-edition adoption degrades, and it is optional.
+- **A malicious operator is unavoidable and already assumed.** An operator controls their own
+  machine, so they can fabricate bytes directly — DNS spoofing or MITM of their own outbound
+  traffic buys them nothing extra. This is why provenance fields (§5) are diagnostic only and
+  never a security claim, and why verification must always run on the *verifier's* own network
+  path rather than being accepted as a reported result.
+
+---
+
+## Appendix A — measured ingest determinism
+
+Run 2026-07-28 on one host, using standalone yt-dlp release binaries. Method: download a
+single pinned format with no remux and no metadata embedding, then `sha256sum` the media file.
+
+| test | formats | result |
+|---|---|---|
+| yt-dlp 2026.07.04, three consecutive runs | 18 | identical |
+| yt-dlp 2026.07.04, two runs each | 140, 251 | identical |
+| **2025.10.22 vs 2026.07.04**, static 2005 video | 18, 140, 251 | **identical** |
+| 2026.07.04, two runs, modern video | 140 | identical |
+| 2025.10.22, modern video | 140 | **HTTP 403 — no output** |
+
+Conclusions drawn: byte determinism for a *named* format holds across a nine-month version
+gap; version skew fails closed rather than diverging; and format *availability* — not format
+content — is what varies, driven by extraction capability and JavaScript-runtime presence.
+
+Explicitly not tested, and not to be implied: regional variance (single host, single IP),
+platform re-encoding over time (the 2005 video is near-maximally static), and any extractor
+other than YouTube.
 
 ---
 
@@ -390,4 +562,5 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
 
 Claims recalled rather than re-derived from a spec are marked `[SOURCE]` and must be verified
 before implementation. Statements about third-party platform behaviour are inference from
-observation unless a documented contract is cited.
+observation unless a documented contract is cited. Protocol claims cite the BEP they were read
+from; empirical claims cite Appendix A.
