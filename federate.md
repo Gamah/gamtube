@@ -1,11 +1,20 @@
 # gamtube federation
 
 **Status:** design document. Nothing here is implemented.
-**Date:** 2026-07-28, revised repeatedly the same day. The largest revision deleted the catalog
-layer outright: nodes never resolve `short_id` → infohash over the network, which removed the
-only place a node would have weighed a stranger's claim, and with it quorum, corroboration
-counting and sampled verification. Protocol citations are read from the BEPs directly rather
-than recalled; determinism claims are measured, see Appendix A.
+**Date:** 2026-07-28, revised repeatedly the same day; revised again 2026-07-29.
+
+The 07-28 revision deleted the catalog layer outright: nodes never resolve `short_id` → infohash
+over the network, which removed the only place a node would have weighed a stranger's claim, and
+with it quorum, corroboration counting and sampled verification.
+
+The 07-29 revision corrected an overclaim that survived it. "No verification is needed" conflated
+byte integrity with *pairing* integrity — nothing binds an infohash to the name it is shared
+under, so a rogue attacks the pairing rather than the bytes (§4). The pairing turns out to be
+provable for free whenever the source URL is alive, which settled two open questions at once: a
+link carries **source URL + infohash**, and `short_id` becomes node-local (§11).
+
+Protocol citations are read from the BEPs directly rather than recalled; determinism claims are
+measured, see Appendix A.
 
 This describes turning gamtube from a single-server re-hoster into a federation of
 self-hosted nodes that replicate video between themselves over BitTorrent and serve it to
@@ -55,7 +64,7 @@ other with BitTorrent; viewers fetch over ordinary HTTP.
 It is not a tube platform, not a social network, and not an archive with guarantees.
 
 The governing principle, from which most of the rest follows: **the network exists to replicate
-what was served, and `URL → short_id → infohash` is king.** Nothing is processed, normalised,
+what was served, and `URL → infohash` is king.** Nothing is processed, normalised,
 or improved on the way in. Where playback convenience and the identity chain conflict, the
 identity chain wins and playback is solved locally (§5).
 
@@ -91,6 +100,12 @@ The relationship is git's: `short_id` is a branch name, the infohash is a commit
 `/v/{short_id}` resolves to whatever the current edition is and may trigger a re-ingest.
 `/v/{short_id}/{infohash}` pins exact bytes forever.
 
+**`short_id` is a node-local key, not a protocol identifier.** It names videos inside one
+instance — its own URL paths, its own duplicate detection — and is never what a link carries
+between nodes, because it is not invertible and therefore not verifiable. A shared link carries
+**source URL + infohash**; see §11, where that is settled, and §4 for why the URL is what makes a
+link checkable at all.
+
 ### Why not derive `short_id` from the infohash
 
 Tempting — the name would then mean exactly one byte stream, self-verifying, no coordination
@@ -116,18 +131,26 @@ Editions arise from re-ingest (source re-fetched after the swarm died), a change
 config, and the divergence exceptions in §5. A `short_id` on its own is not servable; resolving
 it to an edition is the *only* job it has.
 
-### URL canonicalisation — protocol-level, rigid
+### URL canonicalisation — now a local concern
 
-`youtube.com/watch?v=X`, `youtu.be/X`, `m.youtube.com/watch?v=X`, and any of those with
-`&t=30s` or tracking params must all reduce to one `short_id`. A canonicalisation ruleset is
-applied before hashing and is **part of the protocol, not an implementation detail.**
+`youtube.com/watch?v=X`, `youtu.be/X`, `m.youtube.com/watch?v=X`, and any of those with `&t=30s`
+or tracking params should all reduce to one `short_id`. A canonicalisation ruleset is applied
+before hashing.
 
-Today a divergent URL costs one duplicate download. In a federation it fragments swarms
-permanently: a different `short_id` means the pre-ingest lookup misses, so both instances
-ingest and neither can help the other. Changing the ruleset later renames every video in the
-network, so if it must ever change it has to be versioned.
+**This was previously stated as protocol-level and rigid, and it no longer is.** The argument was
+that a divergent URL fragments swarms permanently, because a different `short_id` makes the
+pre-ingest lookup miss. That lookup was deleted with the catalog, so it cannot miss. What
+actually determines the swarm is the infohash, and the infohash is a function of the bytes yt-dlp
+retrieved — two nodes handed `youtu.be/X` and `youtube.com/watch?v=X` extract the same video and
+converge regardless of how either spelled the URL.
 
-The requirement is locked. The ruleset itself is open — see §11.
+What is left is real but local: deduplicating submissions within one instance, and recognising
+that two links name the same video. Both matter to a node's own behaviour and to none of its
+peers, so a node with sloppier rules than its neighbour wastes its own disk and costs the network
+nothing. Versioning it renames nothing outside the instance that changed it.
+
+The ruleset is open — see §11 — and its stakes are now much lower than this section previously
+claimed.
 
 ---
 
@@ -137,7 +160,7 @@ Layer by rate of change, and never let a fast-changing signal into a slow-changi
 
 | layer | carries | mechanism | changes |
 |---|---|---|---|
-| identity | `short_id` + infohash | carried in the link itself | never |
+| identity | source URL + infohash | carried in the link itself | never |
 | liveness | who has this infohash right now | mainline DHT | per play |
 | bytes | the video itself, node↔node | BitTorrent | continuously |
 | playback | the video itself, node→viewer | HTTP range over a locally-muxed file | per play |
@@ -165,7 +188,7 @@ seeder. Nobody should later mistake the auth toggle for privacy.
 No ActivityPub, no follow graph, no signed feeds, no rendezvous, no `short_id` lookup of any
 kind. Instances are independent and **the link is the entry.**
 
-A shareable link carries `short_id` *and* infohash. That is sufficient, because a node only
+A shareable link carries the source URL *and* an infohash. That is sufficient, because a node only
 ever needs to answer one of two questions:
 
 1. **Is the source URL up?** Then derive it — pull from the platform (§5). Nothing else is
@@ -190,27 +213,57 @@ message)" plus salt, so a reader needs the publisher's key and cannot derive the
 URL. A **BEP 5 rendezvous on a synthetic target does work** technically — the spec places no
 constraint on the 20-byte value — but it is exactly the lookup we no longer want.
 
-The cost, stated plainly: **a bare `short_id` whose source URL is dead is unavailable.** No
-lookup, no recovery, no exception. Links carry infohashes for precisely this reason.
+The cost, stated plainly: **a link with no infohash, whose source URL is dead, is unavailable.**
+No lookup, no recovery, no exception. Links carry infohashes for precisely this reason.
 
-### Why no verification is needed
+### What is verified, and what is merely asserted
 
-Because a node only ever fetches an infohash it was *handed*, there is no moment at which it
-accepts a stranger's assertion about what content is.
+There are three bindings in this design and they are not equally strong. Conflating them is how
+the earlier drafts of this section overclaimed.
 
-**BitTorrent pins the bytes.** Every block is checked against the merkle tree; the infohash is
+| binding | strength |
+|---|---|
+| infohash → bytes | cryptographic; unbreakable |
+| URL → `short_id` | cryptographic; recomputable by anyone holding the URL |
+| **name ↔ infohash** | **an assertion — nothing in BitTorrent enforces it** |
+
+**Byte integrity is absolute.** Every block is checked against the merkle tree; the infohash is
 the content. A rogue node cannot inject different bytes into a swarm under someone else's
 infohash — it would have to break the hash function. It can refuse to serve, stall, or lie about
-what it holds, none of which substitutes content. The failure modes are availability failures,
-not integrity failures.
+what it holds, none of which substitutes content.
 
-So there is no verification step, no quorum, no recomputation-on-adopt, no derivation counting,
-and no sampled range-requesting of the source CDN. Those all existed to make a `short_id`
-lookup safe, and the lookup is gone.
+**Pairing integrity is not.** "These bytes are the video at that URL" is a claim carried by the
+link, and the third row above is where a rogue works: hand out a link naming an innocuous video
+alongside the infohash of something else entirely. The fetch succeeds, every block validates,
+and the node serves exactly what the rogue intended under a name that means something else. No
+hash function was harmed. The interesting attack was never byte substitution; it is asserting a
+pairing.
 
-**Determinism is still load-bearing, but for a different reason.** It is what makes two nodes
+So the earlier claim that "a node only ever fetches an infohash it was *handed*, therefore it
+never accepts a stranger's assertion" is wrong as stated: **being handed the link by a stranger
+is the attack.** What is true is narrower, and it is enough —
+
+**The pairing is provable exactly when the source URL is alive.** A node holding the URL derives
+it and compares the result to the infohash the link named. Match proves the pairing outright,
+with no catalog, no quorum and nobody's word taken; the platform is the trust anchor, and it is
+the only anchor in this design that is not a node. Mismatch is honest divergence or a lie and
+the node cannot tell which — but §5 already says what to do about a mismatch, and doing it
+requires no adjudication. This costs nothing, because the derive already happens on every
+ingest: see §5, where the upstream pull is shown to be a proof and not only a freshness policy.
+
+**When the source is dead the pairing is unverifiable, permanently.** Nothing can be done about
+this and nothing is attempted. It is recorded as an assumption in §12 and as a column in §7's
+availability table rather than papered over.
+
+What remains deleted: no quorum, no recomputation-on-adopt, no derivation counting, and no
+sampled range-requesting of the source CDN. Those existed to make a `short_id` lookup safe, and
+the lookup is gone. Derive-and-compare replaces none of them — it is a check a node performs
+against the platform using only what it already fetched.
+
+**Determinism is still load-bearing, and now for two reasons.** It is what makes two nodes
 independently deriving the same URL arrive at the same swarm rather than fragmenting into
-separate ones. If a platform starts serving different byte streams for the same URL, this design
+separate ones — and it is what gives derive-and-compare any meaning at all, since on a
+non-deterministic platform a mismatch says nothing and the check degrades to noise. If a platform starts serving different byte streams for the same URL, this design
 breaks — and that is accepted rather than defended against. Patching around it would mean
 rebuilding exactly the trust machinery just deleted. See §12.
 
@@ -220,6 +273,15 @@ Nodes are anonymous and anyone can run one, so assume a hostile fraction. Their 
 by the fact that every fetch is infohash-addressed.
 
 **They cannot substitute bytes** — see above.
+
+**They can assert a false pairing**, and that is the real surface. A link naming one video and
+the infohash of another is fetched and served without complaint. Two things bound it. Where the
+source URL is alive the node derives and catches the mismatch. Where it is not, the link is
+trusted — but a link has a single identifiable sender, so this is the same threat model as
+someone emailing you a URL today: a social problem with a traceable origin, not a network one.
+What makes it *only* that is the absence of a shared namespace: because no `short_id` lookup
+exists and none is published, there is nowhere for a rogue to assert a pairing into and have
+strangers find it. The attack cannot be broadcast, only handed over.
 
 **They cannot serve a viewer they have no relationship with.** Per §6, direct-serve means
 serving *that node's own registered clients*. Strangers serve other nodes, over BitTorrent. A
@@ -234,7 +296,7 @@ plain-HTTP dumb-client property that justified not delivering over BitTorrent at
 wanting end-to-end verification fetches the raw streams and muxes them itself — a native-client
 option, never the default.
 
-**The one open surface: abandoned swarms.** A rogue can watch for a `short_id`/infohash pair
+**The one open surface: abandoned swarms.** A rogue can watch for a URL/infohash pair
 with few or no seeders and start seeding *its own* file. It cannot serve that file under the
 original infohash, so it cannot poison an existing link — but it can occupy the space around a
 dying video and, over time, be the only thing still answering. Worth tracking rather than
@@ -269,6 +331,15 @@ the bytes either way. The reasons are freshness and independence. A network that
 peers would drift into a stale mirror: every node holding a two-year-old edition while the
 platform quietly serves something else. "Replicate what was served" means *what is served now*.
 Deriving also keeps a node's ability to obtain live content independent of swarm health.
+
+**The upstream pull is also the design's only verification, and it is free.** When a node
+derives a URL it was handed alongside an infohash, comparing its own result to the claimed one
+proves or refutes the link's pairing (§4). No extra fetch, no extra byte, no third party: the
+work was going to happen anyway under the acquisition rule, and noticing the comparison is the
+entire mechanism. This is a second reason the upstream pull is the default, and unlike freshness
+and independence it is a correctness reason — which means a node that quietly skips the pull
+(below) is also opting out of the only check available to it. That is a fair trade for an
+operator to make; it should be made knowingly.
 
 **This is a default, not an enforceable constraint.** A node that fetches a held infohash from
 peers instead produces byte-identical results, so the deviation is invisible to everyone and
@@ -309,7 +380,7 @@ has since re-encoded shows up as two editions rather than one silently swapped o
 
 **The network exists to replicate what was served.** An edition is exactly the bytes yt-dlp
 retrieved under the pinned config — verbatim, unprocessed, in whatever shape the platform
-delivered them. `URL → short_id → infohash` is the spine of the design, and nothing is allowed
+delivered them. `URL → infohash` is the spine of the design, and nothing is allowed
 to bend it.
 
 Concretely, that means the edition is a **multi-file torrent** whenever the pinned format is
@@ -462,9 +533,10 @@ version negotiation, no rewriting of old records. Obsolete editions are garbage 
 disinterest.
 
 The one visible cost: a link that named a specific infohash breaks when that edition dies. It
-degrades gracefully rather than dead-ending, because the link also carries `short_id` — the
+degrades gracefully rather than dead-ending, because the link also carries the source URL — the
 receiving instance re-ingests under the current config and mints a fresh edition. That is the
-cold→warm path in §7 doing its job.
+cold→warm path in §7 doing its job, and it is the recovery a `short_id`-bearing link could not
+have performed (§11).
 
 ---
 
@@ -504,11 +576,16 @@ bandwidth ceilings so one viewer can't drain a node.
 
 Not two states. A cache hierarchy.
 
-| state | meaning | recovery |
-|---|---|---|
-| **warm** | seeds online | plays now |
-| **cold** | no seeds, source URL still resolves | any instance can re-ingest → new edition |
-| **gone** | no seeds, source dead | nothing to do |
+| state | meaning | recovery | link's pairing (§4) |
+|---|---|---|---|
+| **warm** | seeds online | plays now | provable by derivation |
+| **cold** | no seeds, source URL still resolves | any instance can re-ingest → new edition | provable by derivation |
+| **gone** | no seeds, source dead | nothing to do | unverifiable, permanently |
+
+The third column is the same axis as the first, not a separate one: **the source URL is what
+makes a pairing checkable, and it is also what makes a video recoverable.** When it dies the
+node loses both at the same moment. A "gone" video that somebody still seeds therefore plays
+fine and can never be shown to be the video its link claims — accepted, per §12.
 
 That middle state is the advantage over every pure-P2P archive, and gamtube already
 implements it: `app/routers/videos.py` flips an `expired` row back to `pending` and re-enqueues
@@ -529,6 +606,15 @@ within a total the operator has consented to donate.
 The important detail is that a like never causes a write on someone else's disk. There is no
 cross-instance griefing vector, the cost lands on storage the operator opted into, and a
 finite budget makes "keep this alive" a decision rather than a reflex.
+
+**Fetching on demand is never pinning on demand.** A node that fetches an infohash to satisfy a
+request holds those bytes as cache — evictable, unannounced beyond the transfer, gone under disk
+pressure. Only a local like against a local budget creates a pin. The rule exists to close an
+amplification vector: if a stranger's link could cause a durable write, a rogue would publish
+links and let honest replicate-only nodes become long-term hosts of its content, addressed under
+a name it chose. §8's economics already prevent this by construction; it is stated here so that
+a later "just pin what we fetched, we already have it" optimisation is recognised as the
+regression it would be.
 
 **Retention is capacity-bound LRU, not a flat TTL.** A fixed 24-hour pin looks reasonable and
 fails badly: everyone who likes a video during its viral hour has their pin expire during the
@@ -586,7 +672,8 @@ DHT, expose magnet links alongside the existing `/v/{id}` links.
 *Broken:* no second node, no federation, nothing replicates.
 
 **2. Editions in the data model.** Infohash column, `Edition` table, URL canonicalisation,
-links carrying both ids, multi-file editions, no ffmpeg in the ingest path.
+shareable links carrying source URL + infohash, multi-file editions, no ffmpeg in the ingest
+path.
 *Proves:* the identity model survives contact with the existing schema.
 *Broken:* editions still only ever have one member.
 
@@ -644,29 +731,56 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
   node ends up in its own swarm for that platform and replication stops working there.
 - **Regional divergence in practice** — untested. If two regions routinely yield different bytes
   for the same format id, the network fragments along regional lines.
-- **URL canonicalisation ruleset** — per-platform rules, tracking-param stripping, and whether
-  it's versioned so it can ever change without renaming everything. The *requirement* is locked;
-  the ruleset is open.
-- **Abandoned-swarm squatting** — tracking rogue nodes that seed their own file alongside a
-  dying `short_id` (§4). Deferred, deliberately.
-- **Does `short_id` still earn its place, and what exactly does a link carry?** These are one
-  question, not two, and both are deferred.
+- **URL canonicalisation ruleset** — per-platform rules and tracking-param stripping. Downgraded
+  from a locked protocol requirement to a local implementation choice (§3): with no `short_id`
+  lookup and no `short_id` on the wire, divergent rules cost the instance that holds them a
+  duplicate download and cost its peers nothing. No versioning needed.
+- **Abandoned-swarm squatting** — tracking rogue nodes that seed their own file alongside a dying
+  video (§4). Deferred, deliberately.
+- **A link carries source URL + infohash. `short_id` is a local index key and does not appear in
+  the protocol.** Settled; recorded here with its reasoning because it was open until the pairing
+  argument in §4 closed it. Two independent reasons, either sufficient:
 
-  With the catalog gone, `short_id` has lost its main job. What remains is a stable name for
-  "the video at this URL" across editions, plus instant duplicate detection at submit — and both
-  of those are satisfied by a purely *local* index key, derived from the URL, that never needs to
-  appear in the protocol.
+  *Recovery.* `short_id` is not invertible. A node handed only a `short_id`, whose swarm is dead
+  and whose source is alive, cannot recover the URL and therefore cannot re-derive — the one
+  recovery that ought to work. Carrying the URL restores it.
 
-  The sharper problem: `short_id` is not invertible. A node handed only a `short_id`, whose swarm
-  is dead and whose source is alive, cannot recover the URL and therefore cannot re-derive — the
-  one recovery that ought to work. That suggests a link should carry **source URL + infohash**,
-  with `short_id` demoted to an implementation detail.
+  *Verification.* Derive-and-compare (§4) is the design's only check on a link's pairing, and it
+  needs the URL. A `short_id`-bearing link is unverifiable even when the source is alive, because
+  the recipient cannot get from the name back to the thing to derive. This is the stronger of the
+  two reasons and it was the one missing.
 
-  Settle that before specifying link format, since it determines what is being encoded. The
-  format decisions waiting behind it: fragment versus path (a `#` fragment never reaches the
-  server, so a node cannot log which edition a viewer asked for — material for an anti-tracking
-  project), encoding of a 64-hex-character v2 infohash (base32 ≈ 52 chars, base64url ≈ 43), and
-  what a link missing its infohash does — currently nothing, per §2.
+  Demoting `short_id` also removes the attack surface it created. A shared namespace is something
+  a rogue can assert into; the squatting concern below, and "associate nefarious bytes with a
+  well-known id" generally, are only expressible if the network has a name anyone can publish
+  claims against. With the name local, there is none. What `short_id` keeps doing is what it does
+  today in `app/ids.py`: stable identity for the video at a URL across editions, and instant
+  duplicate detection at submit. Both are local jobs.
+
+  Still open, and now purely format: fragment versus path (a `#` fragment never reaches the
+  server, so a node cannot log which video a viewer asked for — material for an anti-tracking
+  project, and it composes well with a link that now carries the URL itself), encoding of a
+  64-hex-character v2 infohash (base32 ≈ 52 chars, base64url ≈ 43), URL escaping inside the link,
+  and what a link missing its infohash does — currently nothing, per §2.
+
+- **Variant classification from response metadata — dead end for security, open for
+  convergence.** Recorded so it is not re-proposed. The appeal is real: if regional divergence
+  exists, some classifier over what the CDN sent back would let a node distinguish an honest
+  regional variant from a rogue's bespoke edition, and would let same-region nodes converge on
+  one swarm instead of each minting a lone edition.
+
+  As a *security* mechanism it cannot work, for the same reason provenance can't (§12): response
+  headers, edge identifiers and timings are typed by the node reporting them, and a rogue writes
+  whatever makes its edition look regionally legitimate. Making them unforgeable would require
+  the platform to sign something covering the response bytes, verifiable offline by a third
+  party. No major platform is believed to do this — signed *URLs* are common and prove nothing
+  about content, and TLS yields no transferable attestation without an MPC notary protocol, far
+  outside scope. `[SOURCE]`, and it would need checking against a real spec before anyone relied
+  on it; a stale "the platform signs it" would be worse than no claim at all.
+
+  As a *convergence* mechanism it may be worth something, and that part stays open — but it is
+  unspecifiable until the regional test in Appendix A runs, since regional variance is currently
+  assumption in both directions. Nothing to design until there is something to classify.
 - **Home-instance-vouched tokens** — the later alternative to per-node registration.
 - **Relay fallback** — when it engages, who pays, how it's capped.
 
@@ -701,6 +815,14 @@ Deliberately unresolved. Each needs a decision before the phase that depends on 
   reputation, adjudicating which edition is canonical — reintroduces exactly the trust machinery
   this design exists without. If it happens at scale it is a bigger conversation about whether
   the approach is viable, not a patch.
+- **A dead source URL makes a link's pairing a permanent trust assumption.** While the source
+  resolves, a node proves for itself that the bytes a link names are the video the link claims
+  (§4). Once it is gone that check is unavailable forever, and a "gone" video that somebody still
+  seeds plays perfectly while being unfalsifiable. **Accepted, not defended against** — the only
+  defences are corroboration and reputation, the machinery this design exists without. The
+  exposure is bounded by the link having a single identifiable sender, and by there being no
+  namespace a rogue can publish a false pairing into (§11). It is not bounded by anything else.
+
 - **A malicious operator is unavoidable and already assumed.** An operator controls their own
   machine and can fabricate bytes directly; DNS spoofing or MITM of their own outbound traffic
   buys them nothing extra. It also gains them nothing, because fabricated bytes have a different
