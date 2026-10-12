@@ -272,8 +272,15 @@ Prompts for public base URL, data directory, admin password, transcoding, and vi
 
 The base URL prompt takes a full URL including scheme, because `MEDIA_BASE_URL` is derived from it (`{BASE_URL}/media`) and an `http://` value on an HTTPS site gets every video blocked as mixed content. `--domain` only ever produces `http://`; type the URL at the prompt for HTTPS.
 
+`deploy.sh` also installs `gamtube-update-ytdlp.timer`: daily (randomised up to 2 h),
+it runs `scripts/update-ytdlp.sh`, which pip-upgrades yt-dlp in the venv and restarts
+the service only when the version actually moved. yt-dlp is imported as a library, so
+nothing picks up a new version without that restart. `requirements.txt` carries floors,
+not pins, and the deploy installs with `--upgrade` so a re-run moves every dep forward.
+
 ```bash
 systemctl status gamtube
+systemctl list-timers gamtube-update-ytdlp.timer
 tail -f /opt/gamtube/logs/app.log
 ```
 

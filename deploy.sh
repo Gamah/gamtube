@@ -152,7 +152,9 @@ rsync -a --delete \
 echo "==> Creating Python venv"
 python3.12 -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip
-"$VENV/bin/pip" install --quiet -r "$DEPLOY_DIR/requirements.txt"
+# --upgrade matters on a re-run: without it pip leaves an already-satisfied
+# floor alone and the deploy never moves yt-dlp forward.
+"$VENV/bin/pip" install --quiet --upgrade -r "$DEPLOY_DIR/requirements.txt"
 
 echo "==> Writing .env (BASE_URL=$BASE_URL)"
 cat > "$DEPLOY_DIR/.env" <<EOF
@@ -199,12 +201,39 @@ StandardError=append:$DEPLOY_DIR/logs/app.log
 WantedBy=multi-user.target
 EOF
 
+echo "==> Installing yt-dlp auto-update timer"
+cat > /etc/systemd/system/gamtube-update-ytdlp.service <<EOF
+[Unit]
+Description=Upgrade yt-dlp for gamtube
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash $DEPLOY_DIR/scripts/update-ytdlp.sh $DEPLOY_DIR $GAMTUBE_USER
+EOF
+
+cat > /etc/systemd/system/gamtube-update-ytdlp.timer <<EOF
+[Unit]
+Description=Daily yt-dlp upgrade for gamtube
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=2h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+EOF
+
 systemctl daemon-reload
 systemctl enable gamtube
 systemctl restart gamtube
+systemctl enable --now gamtube-update-ytdlp.timer
 
 echo ""
 echo "==> Done."
 echo "    Service : systemctl status gamtube"
 echo "    Logs    : tail -f $DEPLOY_DIR/logs/app.log"
+echo "    yt-dlp  : systemctl list-timers gamtube-update-ytdlp.timer"
 echo "    Submit  : curl -X POST $BASE_URL/submit -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"
