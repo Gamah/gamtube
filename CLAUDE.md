@@ -65,7 +65,10 @@ gamtube/
 │       ├── 0005_thumbnail_url.py
 │       └── 0006_transcoded.py    # transcoded bool; backfills ready rows to true
 ├── alembic.ini
+├── Makefile                 # up / status / logs / update-ytdlp / dev / migrate
 ├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + systemd
+├── scripts/
+│   └── update-ytdlp.sh      # timer-driven yt-dlp upgrade; restarts only on a version change
 ├── .env.example
 ├── requirements.txt
 └── run.py                   # uvicorn app.main:app --reload
@@ -256,8 +259,8 @@ Videos expire after `VIDEO_TTL_HOURS` hours (default 24). On expiry the **file i
 
 ```bash
 cp .env.example .env
-alembic upgrade head
-python run.py
+make migrate
+make dev
 ```
 
 ## Deploying (Ubuntu 24.04 LXC)
@@ -271,6 +274,10 @@ Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app 
 Prompts for public base URL, data directory, admin password, transcoding, and video TTL. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** — a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` skips the prompts entirely; `--domain`/`--port`/`--data-dir` override non-interactively.
 
 The base URL prompt takes a full URL including scheme, because `MEDIA_BASE_URL` is derived from it (`{BASE_URL}/media`) and an `http://` value on an HTTPS site gets every video blocked as mixed content. `--domain` only ever produces `http://`; type the URL at the prompt for HTTPS.
+
+On an existing guest the whole update is `make up` (git pull --ff-only +
+`deploy.sh --keep` + a version printout); `make status`, `make logs` and
+`make update-ytdlp` cover the rest. Set `DEPLOY_DIR=` if the app is not in `/opt/gamtube`.
 
 `deploy.sh` also installs `gamtube-update-ytdlp.timer`: daily (randomised up to 2 h),
 it runs `scripts/update-ytdlp.sh`, which pip-upgrades yt-dlp in the venv and restarts
