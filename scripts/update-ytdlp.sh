@@ -10,7 +10,7 @@ VENV="$DEPLOY_DIR/.venv"
 version() { "$VENV/bin/python" -c 'import yt_dlp; print(yt_dlp.version.__version__)' 2>/dev/null || echo none; }
 
 before="$(version)"
-sudo -u "$RUN_USER" "$VENV/bin/pip" install --quiet --upgrade yt-dlp
+sudo -u "$RUN_USER" "$VENV/bin/pip" install --quiet --upgrade 'yt-dlp[default,curl-cffi]'
 after="$(version)"
 
 if [ "$before" = "$after" ]; then
