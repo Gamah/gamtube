@@ -34,9 +34,13 @@ def _start_bot(app: FastAPI) -> asyncio.Task | None:
     from bot.client import run_client
 
     def evicted(key: str, item, reason: str) -> None:
+        # complete= is the one that matters: if Discord never pulled the whole
+        # file before we dropped it, it has no copy to serve afterwards, which
+        # is the likeliest reason an old embed plays for one link and not
+        # another.
         log.info(
-            "store evict %s (%s) after %d fetch(es), %.1fMB",
-            key, reason, item.fetches, item.size / 1048576,
+            "store evict %s (%s) after %d fetch(es), served %d/%d bytes, complete=%s",
+            key, reason, item.fetches, item.served_bytes, item.size, item.complete,
         )
 
     app.state.bot_store = MemoryStore(
