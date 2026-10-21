@@ -12,7 +12,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
 from bot.agents import DEFAULT_CRAWLERS, is_crawler
 from bot.ranges import parse_range
-from bot.scope import allowed_by_ids, opted_in
+from bot.scope import allowed_by_ids, missing_capabilities, opted_in
 from bot.store import Item, MemoryStore
 from core.titles import clean_title, safe_filename
 
@@ -346,6 +346,43 @@ store = MemoryStore(ttl_seconds=10, max_bytes=100, now=clock,
 store.put("x", item(50))
 clock.t += 1000
 eq("callback failure is contained", store.get("x"), None)
+
+
+# ---- missing_capabilities: all four permissions are per-channel now, so a
+# half-ticked channel must be reported rather than silently doing nothing ----
+class Perms:
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __getattr__(self, name):
+        return False
+
+
+class PermChan:
+    def __init__(self, perms):
+        self._perms = perms
+
+    def permissions_for(self, me):
+        return self._perms
+
+
+ALL_FOUR = dict(view_channel=True, send_messages=True,
+                read_message_history=True, embed_links=True)
+
+eq("fully granted channel", missing_capabilities(me, PermChan(Perms(**ALL_FOUR))), [])
+eq("missing send_messages",
+   missing_capabilities(me, PermChan(Perms(**{**ALL_FOUR, "send_messages": False}))),
+   ["send_messages"])
+eq("missing embed_links",
+   missing_capabilities(me, PermChan(Perms(**{**ALL_FOUR, "embed_links": False}))),
+   ["embed_links"])
+eq("nothing granted",
+   missing_capabilities(me, PermChan(Perms())),
+   ["view_channel", "send_messages", "read_message_history", "embed_links"])
+eq("custom requirement set",
+   missing_capabilities(me, PermChan(Perms(embed_links=True)), ("embed_links",)), [])
+eq("channel without permissions_for", missing_capabilities(me, object()), [])
+eq("no member object", missing_capabilities(None, PermChan(Perms())), [])
 
 if fails:
     print(f"FAIL ({len(fails)})")

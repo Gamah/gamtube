@@ -65,3 +65,30 @@ def opted_in(me, channel, permission: str) -> bool:
             return True
 
     return False
+
+
+# Everything the bot needs in a channel to do its job. With nothing granted at
+# the role level these are all per-channel, so a half-ticked channel is an easy
+# mistake — and a silent one, since the bot simply never replies.
+REQUIRED_CAPABILITIES: tuple[str, ...] = (
+    "view_channel",
+    "send_messages",
+    "read_message_history",
+    "embed_links",
+)
+
+
+def missing_capabilities(
+    me, channel, required: tuple[str, ...] = REQUIRED_CAPABILITIES
+) -> list[str]:
+    """Which of `required` the bot effectively lacks in `channel`.
+
+    Unlike `opted_in`, this is the *effective* permission — overwrite plus role
+    plus category — because the question here is "can it actually work", not
+    "was it deliberately switched on".
+    """
+    permissions_for = getattr(channel, "permissions_for", None)
+    if permissions_for is None or me is None:
+        return []
+    perms = permissions_for(me)
+    return [p for p in required if getattr(perms, p, False) is not True]

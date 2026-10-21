@@ -65,21 +65,27 @@ Without it every message arrives with empty content and the bot sees no links
 at all — it will connect, log in, and do nothing. The intent is free to toggle
 for a personal bot; past roughly 100 servers Discord requires review.
 
-### 3. Invite it
+### 3. Invite it with no permissions at all
 
-Generate an invite with the **`bot`** scope and these permissions:
+On the application's **Installation** page set the install link to **Discord
+Provided Link**, and under **Default Install Settings → Guild Install** set
+scope `bot` and **no permissions**. Then the invite is just:
 
-| Permission | Why |
-|---|---|
-| View Channels | see the message |
-| Send Messages | post the reply |
-| Read Message History | re-read the message after Discord unfurls it |
+```
+https://discord.com/oauth2/authorize?client_id={APP_ID}
+```
 
-Read Message History is not optional — the bot re-fetches the message to find
-out what Discord managed to embed.
+Discord reads the scopes from what you saved, so there is one place to change
+this later rather than a URL to rebuild.
 
-**Do not grant Embed Links here.** That one is granted per channel, and it is
-what opts a channel in.
+**Granting nothing server-wide is the point.** The bot cannot see a channel it
+hasn't been added to, so `on_message` never fires there and it never receives
+message content from the rest of the server. "Add the bot to this channel" then
+means exactly one thing instead of two layers.
+
+If you later decide you'd rather it be able to work anywhere by default, move
+View Channels / Send Messages / Read Message History into the install settings
+and keep only Embed Links per channel. Nothing in the code changes.
 
 ### 4. Check the public URL
 
@@ -92,15 +98,33 @@ fronts gamtube needs no new routing.
 
 ## Opting a channel in
 
-The bot acts only in channels that **explicitly grant it Embed Links** as a
-channel permission overwrite:
+Since the bot holds no server-wide permissions, a channel is enabled by giving
+it everything it needs right there:
 
-> Channel → **Edit Channel** → **Permissions** → add the bot's role (or the bot
-> itself) → tick **Embed Links** → save.
+> Channel → **Edit Channel** → **Permissions** → add the bot (or its role) →
+> tick all four → save.
 
-Removing that overwrite opts the channel back out. There is no command and no
-stored state: Discord is the record, so it survives restarts and redeploys, and
-there is nothing to keep in sync.
+| Permission | Why |
+|---|---|
+| View Channels | see the channel exists at all |
+| Send Messages | post the reply |
+| Read Message History | re-read the message after Discord unfurls it |
+| **Embed Links** | the opt-in marker, and what makes the reply unfurl |
+
+Removing them opts the channel back out. There is no command and no stored
+state: Discord is the record, so it survives restarts and redeploys, and there
+is nothing to keep in sync.
+
+`Embed Links` is the one the bot actually tests for. Tick it without
+`Send Messages` and the channel looks enabled but can't be replied in — so the
+startup log warns about exactly that:
+
+```
+WARN  gamtube.bot  my-server: #clips is opted in but the bot lacks send_messages there; it will not be able to reply
+```
+
+A channel missing `View Channels` won't appear in the log at all, because the
+bot can't see it.
 
 It is also the permission the bot genuinely needs — without Embed Links its
 reply posts as plain text and never unfurls — so the marker and the capability

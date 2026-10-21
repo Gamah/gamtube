@@ -298,9 +298,17 @@ overwrite granting the bot `OPT_IN_PERMISSION` (default `embed_links`, which is
 also the permission it needs for its reply to unfurl at all, so marker and
 capability can't disagree). Discord stores it, so it survives restarts with no
 file, DB or command to sync. Three things deliberately don't count: base role
-permissions from the invite (not overwrites — which is why `docs/bot.md` tells
-you to leave Embed Links out of the invite), an `@everyone` overwrite (it would
-enable every channel at once), and category inheritance. Threads have no
+permissions from the invite (not overwrites), an `@everyone` overwrite (it
+would enable every channel at once), and category inheritance.
+
+The documented setup grants the bot **no server-wide permissions at all** — the
+install link carries none — so all four of `view_channel`, `send_messages`,
+`read_message_history` and `embed_links` are granted per channel. The bot then
+cannot see a channel it hasn't been added to and never receives message content
+from the rest of the server. `scope.missing_capabilities()` reports a
+half-ticked channel at startup, since Embed Links alone looks enabled but
+cannot reply. Moving the first three into the install settings is a supported
+fallback and needs no code change. Threads have no
 overwrites of their own — discord.py doesn't even give `Thread` an
 `overwrites_for` — so a thread follows its parent. `CHANNEL_OPT_IN=false` drops
 the requirement.

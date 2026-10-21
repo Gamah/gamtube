@@ -24,7 +24,7 @@ import discord
 from bot.config import BotSettings
 from bot.detect import extract_candidates, unembedded
 from bot.handler import rehost
-from bot.scope import allowed_by_ids, opted_in
+from bot.scope import allowed_by_ids, missing_capabilities, opted_in
 from bot.store import MemoryStore
 
 log = logging.getLogger("gamtube.bot")
@@ -157,6 +157,19 @@ def build_client(
             ]
             if enabled:
                 log.info("%s: enabled in %s", guild.name, ", ".join(enabled))
+                # All four permissions are granted per channel, so a channel
+                # ticked for Embed Links but missing Send Messages looks
+                # enabled and silently does nothing. Say so at startup.
+                for channel in guild.text_channels:
+                    if channel.name not in enabled:
+                        continue
+                    gaps = missing_capabilities(guild.me, channel)
+                    if gaps:
+                        log.warning(
+                            "%s: #%s is opted in but the bot lacks %s there; "
+                            "it will not be able to reply",
+                            guild.name, channel.name, ", ".join(gaps),
+                        )
             else:
                 log.warning(
                     "%s: no channel grants %s to the bot, so it will do nothing here",
