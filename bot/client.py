@@ -26,11 +26,9 @@ from bot.detect import extract_candidates, unembedded
 from bot.handler import rehost
 from bot.scope import (
     REQUIRED_CAPABILITIES,
-    allowed_by_ids,
     actionable,
+    allowed_by_ids,
     missing_capabilities,
-    opted_in,
-    unopted_visible,
 )
 from bot.store import MemoryStore
 
@@ -48,13 +46,10 @@ def in_scope(message: discord.Message, settings: BotSettings) -> tuple[bool, str
         settings.channel_ids(),
     ):
         return False, "guild/channel not in DISCORD_GUILDS/DISCORD_CHANNELS"
-    if not settings.channel_opt_in:
-        return True, "opt-in disabled"
-    if guild is None:
-        return False, "DM, which cannot carry a permission overwrite"
-    if not opted_in(guild.me, message.channel, settings.opt_in_permission):
-        return False, f"channel does not explicitly grant {settings.opt_in_permission}"
-    return True, "opted in"
+    # Nothing else to check: the message reached us, so the bot can see the
+    # channel, and a channel it should stay out of is one where Discord denies
+    # it View Channels.
+    return True, "in scope"
 
 
 def describe_embeds(message: discord.Message) -> str:
@@ -135,22 +130,14 @@ def report_guild(guild: discord.Guild, settings: BotSettings) -> None:
 
     "Why did nothing happen" is the question this bot gets asked most, so the
     answer is logged once per guild at startup rather than reconstructed from
-    Discord's permission UI. The capability gaps matter more than the count:
-    a channel it can see but cannot post in is silent, and only this line
-    says so.
+    Discord's permission UI. The gaps matter more than the count: a channel it
+    can see but cannot post in is silent, and only this line says so.
     """
     channels = guild.text_channels
-    active = actionable(
-        guild.me, channels, settings.opt_in_permission,
-        opt_in=settings.channel_opt_in,
-    )
+    active = actionable(guild.me, channels)
     if not active:
-        log.warning(
-            "%s: the bot will reply in none of its %d text channel(s) (%s)",
-            guild.name, len(channels),
-            f"no channel grants {settings.opt_in_permission}"
-            if settings.channel_opt_in else "it cannot see any of them",
-        )
+        log.warning("%s: the bot can see none of its %d text channel(s), "
+                    "so it will do nothing here", guild.name, len(channels))
         return
 
     log.info("%s: will reply in %d of %d text channel(s): %s",
@@ -178,22 +165,6 @@ def report_guild(guild: discord.Guild, settings: BotSettings) -> None:
                      "so every clip there goes out as a link",
                      guild.name, channel.name)
 
-    if settings.channel_opt_in:
-        # Only meaningful under opt-in: the gap between what it sees and what
-        # it may act in is what the category deny procedure closes.
-        unopted = unopted_visible(guild.me, channels, settings.opt_in_permission)
-        if unopted:
-            log.warning(
-                "%s: %d of %d text channel(s) visible but not opted in (%s); "
-                "deny View Channels to the bot's role at the category level to "
-                "make it blind - see docs/bot.md",
-                guild.name, len(unopted), len(channels), _names(unopted),
-            )
-        else:
-            log.info("%s: blind outside its opted-in channels (0 of %d text "
-                     "channel(s) visible but not opted in)",
-                     guild.name, len(channels))
-
 
 def _names(channels: list, limit: int = 5) -> str:
     names = [c.name for c in channels[:limit]]
@@ -216,10 +187,9 @@ def build_client(
     async def on_ready() -> None:
         log.info("connected as %s in %d guild(s)", client.user, len(client.guilds))
         log.info(
-            "config: wait=%.1fs opt_in=%s/%s item<=%dMB store<=%dMB ttl=%ds "
+            "config: wait=%.1fs item<=%dMB store<=%dMB ttl=%ds "
             "force_mp4=%s notice=%s media_gate=%s warm=%s",
-            settings.embed_wait_seconds, settings.channel_opt_in,
-            settings.opt_in_permission, settings.max_item_mb,
+            settings.embed_wait_seconds, settings.max_item_mb,
             settings.max_memory_mb, settings.link_ttl_seconds,
             settings.force_mp4, settings.human_notice,
             settings.media_agents() or "open",
@@ -284,12 +254,6 @@ async def run_client(
     Anything other than cancellation is logged and returns, so a bad token or a
     gateway problem degrades to "no bot" rather than taking the web app down.
     """
-    if settings.opt_in_permission not in discord.Permissions.VALID_FLAGS:
-        log.error(
-            "OPT_IN_PERMISSION=%r is not a Discord permission name; bot not started",
-            settings.opt_in_permission,
-        )
-        return
     try:
         client = build_client(settings, store, base_url)
         async with client:

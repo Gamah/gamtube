@@ -17,8 +17,6 @@ from bot.scope import (
     allowed_by_ids,
     can_view,
     missing_capabilities,
-    opted_in,
-    unopted_visible,
 )
 from bot.store import Item, MemoryStore
 from bot.upload import affordable_kbps, plan
@@ -145,77 +143,6 @@ eq("channel allowlist miss", allowed_by_ids(1, 9, set(), {2}), False)
 eq("dm rejected when guilds listed", allowed_by_ids(None, 2, {1}, set()), False)
 eq("dm allowed with no allowlist", allowed_by_ids(None, 2, set(), set()), True)
 eq("both must pass", allowed_by_ids(1, 9, {1}, {2}), False)
-
-
-# ---- scope: opt-in by explicit permission overwrite ----
-class Ov:
-    """Stand-in for PermissionOverwrite: unset permissions read as None."""
-    def __init__(self, **kw):
-        self.__dict__.update(kw)
-
-    def __getattr__(self, name):
-        return None
-
-
-class Role:
-    def __init__(self, name):
-        self.name = name
-
-
-class Guild:
-    def __init__(self, default_role):
-        self.default_role = default_role
-
-
-class Me:
-    def __init__(self, roles, guild):
-        self.roles = roles
-        self.guild = guild
-
-
-class Chan:
-    def __init__(self, grants=None):
-        self._grants = grants or {}
-
-    def overwrites_for(self, obj):
-        return self._grants.get(obj, Ov())
-
-
-class Thread:
-    def __init__(self, parent):
-        self.parent = parent
-
-
-everyone = Role("@everyone")
-botrole = Role("gamtube")
-guild = Guild(everyone)
-me = Me([everyone, botrole], guild)
-
-eq("explicit member grant",
-   opted_in(me, Chan({me: Ov(embed_links=True)}), "embed_links"), True)
-eq("explicit bot-role grant",
-   opted_in(me, Chan({botrole: Ov(embed_links=True)}), "embed_links"), True)
-eq("@everyone grant does not opt in",
-   opted_in(me, Chan({everyone: Ov(embed_links=True)}), "embed_links"), False)
-eq("no overwrites at all",
-   opted_in(me, Chan(), "embed_links"), False)
-eq("explicit deny is not a grant",
-   opted_in(me, Chan({botrole: Ov(embed_links=False)}), "embed_links"), False)
-eq("a different permission does not count",
-   opted_in(me, Chan({botrole: Ov(send_messages=True)}), "embed_links"), False)
-eq("configurable permission name",
-   opted_in(me, Chan({botrole: Ov(send_messages=True)}), "send_messages"), True)
-eq("thread inherits its parent's grant",
-   opted_in(me, Thread(Chan({botrole: Ov(embed_links=True)})), "embed_links"), True)
-eq("thread with no parent grant",
-   opted_in(me, Thread(Chan()), "embed_links"), False)
-eq("missing member object",
-   opted_in(None, Chan({botrole: Ov(embed_links=True)}), "embed_links"), False)
-eq("channel without overwrites_for",
-   opted_in(me, object(), "embed_links"), False)
-eq("guild with no default_role still checks roles",
-   opted_in(Me([botrole], Guild(None)), Chan({botrole: Ov(embed_links=True)}),
-            "embed_links"), True)
 
 
 # ---- ranges ----
@@ -359,6 +286,7 @@ eq("callback failure is contained", store.get("x"), None)
 # ---- missing_capabilities: all four permissions are per-channel now, so a
 # half-ticked channel must be reported rather than silently doing nothing ----
 class Perms:
+    """Stand-in for Permissions: anything not granted reads as False."""
     def __init__(self, **kw):
         self.__dict__.update(kw)
 
@@ -374,6 +302,7 @@ class PermChan:
         return self._perms
 
 
+me = object()
 ALL_FOUR = dict(view_channel=True, send_messages=True,
                 read_message_history=True, embed_links=True)
 
@@ -393,75 +322,32 @@ eq("channel without permissions_for", missing_capabilities(me, object()), [])
 eq("no member object", missing_capabilities(None, PermChan(Perms())), [])
 
 
-# ---- can_view / unopted_visible: "how many channels can it see that it was
-# never opted into" is the number the documented blindness procedure drives to
-# zero, so it is what the startup warning counts ----
+# ---- can_view / actionable: where the bot will reply is just where it can
+# see, since excluding a channel is a View Channels deny ----
 class VisChan:
-    """Both halves at once: effective permissions and explicit overwrites."""
-    def __init__(self, name, perms, grants=None):
+    def __init__(self, name, perms):
         self.name = name
         self._perms = perms
-        self._grants = grants or {}
 
     def permissions_for(self, member):
         return self._perms
 
-    def overwrites_for(self, obj):
-        return self._grants.get(obj, Ov())
-
 
 visible = Perms(view_channel=True)
 hidden = Perms()
-granted = {botrole: Ov(embed_links=True)}
 
 eq("visible channel", can_view(me, VisChan("a", visible)), True)
 eq("denied channel", can_view(me, VisChan("a", hidden)), False)
 eq("can_view without permissions_for", can_view(me, object()), False)
 eq("can_view without member", can_view(None, VisChan("a", visible)), False)
 
-eq("visible and not opted in counts",
-   [c.name for c in unopted_visible(me, [VisChan("general", visible)], "embed_links")],
-   ["general"])
-eq("visible and opted in does not count",
-   unopted_visible(me, [VisChan("clips", visible, granted)], "embed_links"), [])
-eq("invisible and not opted in does not count",
-   unopted_visible(me, [VisChan("secrets", hidden)], "embed_links"), [])
-eq("fully blind guild reports nothing",
-   unopted_visible(me, [VisChan("a", hidden), VisChan("b", hidden)], "embed_links"), [])
-eq("the half-done state: opted in plus leftovers",
-   [c.name for c in unopted_visible(
-       me,
-       [VisChan("clips", visible, granted), VisChan("general", visible),
-        VisChan("staff", hidden), VisChan("random", visible)],
-       "embed_links")],
-   ["general", "random"])
-eq("an @everyone overwrite is not an opt-in here either",
-   [c.name for c in unopted_visible(
-       me, [VisChan("general", visible, {everyone: Ov(embed_links=True)})],
-       "embed_links")],
-   ["general"])
-eq("no channels at all", unopted_visible(me, [], "embed_links"), [])
-
-# ---- actionable: where the bot will actually reply. Opt-in off is the
-# default, so visibility alone decides and denying View Channels is the opt
-# out; opt-in on narrows it to the explicitly granted channels ----
-mixed = [VisChan("clips", visible, granted), VisChan("general", visible),
-         VisChan("staff", hidden)]
-
-eq("opt-in off: everything it can see",
-   [c.name for c in actionable(me, mixed, "embed_links", opt_in=False)],
+eq("actionable is everything it can see",
+   [c.name for c in actionable(
+       me, [VisChan("clips", visible), VisChan("staff", hidden),
+            VisChan("general", visible)])],
    ["clips", "general"])
-eq("opt-in off: a denied channel is still out",
-   actionable(me, [VisChan("staff", hidden)], "embed_links", opt_in=False), [])
-eq("opt-in on: only the granted one",
-   [c.name for c in actionable(me, mixed, "embed_links", opt_in=True)],
-   ["clips"])
-eq("opt-in on: a grant it cannot see does not count",
-   actionable(me, [VisChan("staff", hidden, granted)], "embed_links",
-              opt_in=True), [])
-eq("no channels at all, either mode",
-   (actionable(me, [], "embed_links", opt_in=False),
-    actionable(me, [], "embed_links", opt_in=True)), ([], []))
+eq("a guild it is blind in", actionable(me, [VisChan("staff", hidden)]), [])
+eq("no channels at all", actionable(me, []), [])
 
 
 # ---- byte accounting: the bot waits on this before posting the link, so

@@ -53,7 +53,7 @@ gamtube/
 │   ├── client.py            # build_client / run_client: on_message, embed re-check, dispatch
 │   ├── config.py            # BotSettings (pydantic-settings), guild/channel/domain parsing
 │   ├── detect.py            # PURE: extract_candidates, is_candidate, norm_url, unembedded
-│   ├── scope.py             # PURE: where it may act, what it can see, what it lacks
+│   ├── scope.py             # PURE: allowlists, visibility, missing capabilities
 │   ├── store.py             # PURE: MemoryStore - TTL + byte-budget, oldest evicted first
 │   ├── ranges.py            # PURE: parse_range - HTTP Range, because Discord sends them
 │   ├── upload.py            # PURE: Outcome enum + plan() - attach, shrink to fit, or link
@@ -62,7 +62,7 @@ gamtube/
 │   ├── web.md               # routes, processing, expiry, storage
 │   └── bot.md               # why attachments, Discord app setup, intents, tuning
 ├── tests/
-│   ├── test_pure.py         # detection, opt-in, store/eviction, ranges, titles, upload plan, mp4 boxes
+│   ├── test_pure.py         # detection, scope, store/eviction, ranges, titles, upload plan, mp4 boxes
 │   ├── test_routes.py       # /d/ routes via TestClient; skips if fastapi is absent
 │   └── test_deploy.sh       # deploy.sh end to end against stubbed system commands
 ├── static/                  # style.css, awesome_face.svg
@@ -388,39 +388,31 @@ re-hosted.
 Links wrapped as `<https://...>` are skipped on purpose: that syntax is how a
 Discord user suppresses an embed, so overriding it would be rude.
 
-**The bot acts wherever it can see a link, and exclusion is a View Channels
-deny.** `CHANNEL_OPT_IN` defaults to false. An earlier default required an
-explicit per-channel grant before the bot would act, which is stricter and was
-wrong in practice: a channel created later is silent, the symptom is nothing
-happening, and six ticks per channel is not how anyone expects a bot to behave.
-Denying the bot View Channels - per channel, or per category, which every
-channel under it inherits - is one overwrite and the thing admins already know
-how to do. Threads have no overwrites of their own (discord.py doesn't even
-give `Thread` an `overwrites_for`), so a thread follows its parent.
+**The bot acts wherever it can see a link, and a server excludes it by denying
+it View Channels.** There is no bot-side permission model, and adding one back
+would be a mistake that has now been made twice: the first default required an
+explicit per-channel overwrite granting `OPT_IN_PERMISSION` before the bot
+would act, which read well and worked badly - a channel created later is
+silent, the symptom is nothing happening, and six ticks per channel is not how
+anyone expects a bot to behave. It was kept behind a flag for one commit and
+then deleted, because a flag nobody sets is just two code paths. **Anything
+Discord's own permissions can express belongs there, not here.** A category
+deny covers every channel under it; threads have no overwrites of their own
+(discord.py doesn't even give `Thread` an `overwrites_for`), so a thread
+follows its parent. `DISCORD_GUILDS` / `DISCORD_CHANNELS` remain as a coarse
+allowlist for pinning a deployment to one server.
 
-The strict mode is kept behind the flag rather than deleted, because
-"nothing until someone enables it" is a real preference and the code is small
-and tested. With `CHANNEL_OPT_IN=true`, `scope.opted_in` requires an
-*explicit* overwrite granting `OPT_IN_PERMISSION` (default `embed_links`,
-which is also what the reply needs to unfurl, so marker and capability can't
-disagree), and three things deliberately don't count: base role permissions
-from the invite, an `@everyone` overwrite (it would enable every channel at
-once), and category inheritance. A DM is refused in that mode, since it can
-carry no overwrite, and answered with opt-in off.
+The bot never writes an overwrite itself - that needs Manage Roles or Manage
+Channels, which is the opposite of the pitch.
 
-Either way the bot never writes an overwrite itself - that needs Manage Roles
-or Manage Channels, which is the opposite of the pitch - and Discord is the
-whole record, so there is no file, DB or command to sync.
-
-`client.report_guild()` is what makes a misconfiguration visible at startup,
-and the questions it answers are the ones the bot gets asked: where will it
-reply (`scope.actionable()`), where is it in scope but unable to post
-(`scope.missing_capabilities()`, a warning, since the channel looks fine and
-is silent), and where will attachments fail (`attach_files`, an info line
-only, since the link fallback still works). Under opt-in it also counts the
-channels it can see but was never opted into (`scope.unopted_visible()`),
-which is the number the category-deny procedure drives to zero. Nothing ever
-refuses to start.
+`client.report_guild()` is what makes a misconfiguration visible, and the
+questions it answers are the ones the bot gets asked: where will it reply
+(`scope.actionable()`, which is just `can_view`), where is it in scope but
+unable to post (`scope.missing_capabilities()`, a warning, since such a
+channel looks fine and is silent), and where will attachments fail
+(`attach_files`, an info line only, since the link fallback still works). A
+guild it can see nothing in warns, because it looks identical to a broken bot.
+Nothing ever refuses to start.
 
 **`gamtube` logging needs `web/logsetup.configure_logging()`.** Uvicorn
 configures its own loggers and never touches the root, so without it an INFO
@@ -461,8 +453,6 @@ TRANSCODE_ENABLED=false         # re-encode to H.264 MP4 on ingest; false = serv
 ADMIN_PASSWORD=                 # password for /manage panel; leave empty to disable
 # bot (ignored by the web app; the web app's keys are ignored by the bot):
 DISCORD_BOT_TOKEN=              # empty = bot service stays disabled
-CHANNEL_OPT_IN=false            # true: a channel must explicitly grant OPT_IN_PERMISSION
-OPT_IN_PERMISSION=embed_links   # validated against discord.Permissions at startup
 DISCORD_GUILDS=                 # comma-separated guild ids; empty = all
 DISCORD_CHANNELS=               # comma-separated channel ids; empty = all
 EMBED_WAIT_SECONDS=3.0          # how long to let Discord unfurl before judging

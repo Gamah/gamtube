@@ -272,8 +272,7 @@ most servers allow all but Attach Files to it - but then the bot's permissions
 change whenever `@everyone` does, which is a surprise you do not need.
 
 **The bot acts wherever it can see a link.** There is no per-channel enabling
-step: see **Excluding a channel** below for the opt-out, and **Requiring an
-explicit opt-in** for the stricter mode if you want the other behaviour.
+step and no bot-side permission model: see **Excluding a channel** below.
 
 ### 4. Check the public URL
 
@@ -302,7 +301,11 @@ these overwrites itself - doing so would need Manage Roles or Manage Channels,
 which it deliberately does not have.
 
 A channel it cannot see is invisible in every sense: no message content, no
-log line, nothing to opt out of twice.
+log line, nothing for the bot to decide. `DISCORD_GUILDS` / `DISCORD_CHANNELS`
+are a coarser allowlist on top, for pinning a deployment to one server while
+testing.
+
+The bot answers a DM the same way, since a DM is a channel it can see.
 
 On connect the bot says where it will reply, and warns when a channel it is in
 cannot actually be replied in - a channel with View Channels but no Send
@@ -328,67 +331,9 @@ to a broken bot:
 WARN  gamtube.bot  my-server: the bot will reply in none of its 12 text channel(s) (it cannot see any of them)
 ```
 
-## Requiring an explicit opt-in
-
-`CHANNEL_OPT_IN=true` inverts the default: the bot then refuses to act unless
-the channel carries an **explicit** permission overwrite granting it
-`OPT_IN_PERMISSION` (default `embed_links`, which is also what its reply needs
-in order to unfurl, so marker and capability cannot disagree).
-
-> Channel → **Edit Channel** → **Permissions** → add the bot (or its role) →
-> tick Embed Links → save.
-
-Use it when a server would rather a new channel be silent until someone
-deliberately enables it. The cost is exactly that: a channel created later does
-nothing, and the symptom is silence.
-
-What does **not** count as opting in:
-
-- **Role-level Embed Links from the invite.** Base role permissions aren't
-  overwrites, so the invite can carry the permission without enabling anything.
-- **An `@everyone` overwrite.** `embed_links` is commonly allowed for
-  `@everyone`, and honouring it would opt in every channel on the server at
-  once, so it is ignored.
-- **Inheriting from a category.** Only an overwrite on the channel itself (or,
-  for a thread, on its parent channel) counts.
-
-In this mode a DM is refused outright, since a DM cannot carry an overwrite.
-With opt-in off the bot answers a DM like any other message it can see.
-
-`OPT_IN_PERMISSION` changes which permission is the marker; it is validated
-against Discord's permission names at startup, so a typo is logged and the bot
-doesn't start rather than silently doing nothing. `DISCORD_GUILDS` /
-`DISCORD_CHANNELS` are a coarser allowlist applied before either rule.
-
-### Blindness in that mode
-
-Opting in controls what the bot *does*, not what it *sees*: it is a server
-member and inherits `@everyone`, so it can usually still read channels it will
-never act in. Closing that gap takes the same overwrites as **Excluding a
-channel** - deny View Channels to the bot's role at the category level, allow
-it back on the channels you opted in - and the startup log reports how far you
-got, because a half-done pass is otherwise invisible:
-
-```
-INFO  gamtube.bot  my-server: blind outside its opted-in channels (0 of 14 text channel(s) visible but not opted in)
-WARN  gamtube.bot  my-server: 7 of 14 text channel(s) visible but not opted in (general, random, offtopic, music, art, and 2 more); deny View Channels to the bot's role at the category level to make it blind - see docs/bot.md
-```
-
-The count is the number to drive to zero, and only appears in this mode -
-with opt-in off, a channel it can see is a channel it works in, so there is
-nothing to compare. It is a warning and never a refusal to start: the gate is
-already correct, so a half-done pass is untidy rather than unsafe.
-
-Only text channels are counted; a voice channel it can see cannot carry a
-link. And a channel listed there may be one you opted in *improperly* - check
-it is not also in an "is in scope but the bot lacks ..." warning.
-
----
-
 ## How it decides to act
 
-1. A message arrives in a channel the bot can see - or, with
-   `CHANNEL_OPT_IN=true`, one that explicitly opted in. Links are matched against
+1. A message arrives in a channel the bot can see. Links are matched against
    `WATCH_DOMAINS` (default list in `bot/detect.py`) - a cheap prefilter so
    unrelated links never cost a yt-dlp call.
 2. Links wrapped as `<https://...>` are skipped. That syntax is how a user

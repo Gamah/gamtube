@@ -113,7 +113,7 @@ echo "== only facts and secrets are pinned; tunables stay in code =="
 # later default changes never reach a deployment. Assert they are absent.
 for tunable in ACK_MODE LINK_NOTE WARMUP_CHANNEL_ID BOT_DEBUG HUMAN_NOTICE \
                MEDIA_USER_AGENTS SHRINK_ENABLED LINK_TTL_SECONDS MAX_ITEM_MB \
-               CHANNEL_OPT_IN OPT_IN_PERMISSION EMBED_WAIT_SECONDS; do
+               UPLOAD_ENABLED UPLOAD_MIN_BITRATE_KBPS EMBED_WAIT_SECONDS; do
   if grep -qE "^$tunable=" "$env_file"; then
     echo " - FAIL $tunable is pinned in .env; it would override the code default"
     fails=$((fails+1))

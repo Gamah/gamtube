@@ -62,9 +62,8 @@ All seven are code defaults in `bot/config.py`.
 [docs/bot.md](docs/bot.md#what-the-reaction-means) has the longer version.
 
 It replies in any channel it can see a watched link in. To keep it out of one,
-deny it **View Channels** there, or on the whole category;
-[docs/bot.md](docs/bot.md#excluding-a-channel) also covers `CHANNEL_OPT_IN`,
-which flips that round and requires a per-channel grant instead.
+deny it **View Channels** there, or on the whole category - that is the only
+switch, and it is Discord's, not the bot's.
 
 ---
 
