@@ -49,9 +49,9 @@ yt-dlp downloads into.
    INFO  gamtube.bot  no Add Reactions here; acknowledging with a message instead
    ```
 
-   Before that public post it **warms** the link, which is why the player
-   usually arrives with the message rather than filling in a second later. See
-   below.
+   With `WARMUP_CHANNEL_ID` set, the link is warmed before this public post so
+   the player arrives with the message rather than filling in a second later.
+   See below.
 5. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
    with byte-range requests to build the player.
 6. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
@@ -76,8 +76,8 @@ Discord has read the page, pulled the video and pushed the embed, and clients
 sometimes don't re-render until you revisit the channel. There is no way to
 pre-attach it, because a bot cannot set an embed's `video` field.
 
-So with `WARMUP_ENABLED` (the default) the bot posts the link somewhere nobody
-is looking first, waits until **we** have served the whole file, pauses
+So when `WARMUP_CHANNEL_ID` names a channel, the bot posts the link there
+first, waits until **we** have served the whole file, pauses
 `WARMUP_SETTLE_SECONDS`, deletes it, and only then posts publicly - by which
 point Discord has the embed cached for that URL.
 
@@ -85,15 +85,13 @@ The wait is on our own byte accounting rather than a timer. We serve the video,
 so "Discord has finished pulling it" is something we know first-hand instead of
 guessing; `WARMUP_TIMEOUT_SECONDS` caps it.
 
-Where it warms:
+It is **off by default**, and there is no implicit target: warming has to post
+the link somewhere, and anywhere picked on your behalf is a visible side effect
+you did not ask for. Use a channel nobody reads, in the same guild, that the
+bot can post in.
 
-- **nothing configured** - the application owner's DM. No setup, invisible to
-  the server, and a bot may DM a user it shares a guild with.
-- **`WARMUP_CHANNEL_ID`** - that channel instead. Same guild, and the bot needs
-  View Channels and Send Messages there.
-
-Every failure path falls back to posting unwarmed: no owner, DMs closed, a
-missing channel, a failed post, a timeout. `WARMUP_ENABLED=false` turns it off.
+Every failure path falls back to posting unwarmed: a missing channel, a failed
+post, a timeout. `WARMUP_CHANNEL_ID=0` turns it off.
 
 Two things this assumes, neither documented by Discord: that the unfurl cache is
 shared across channels, and that a short settle is enough. The log settles it -

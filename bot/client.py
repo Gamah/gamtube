@@ -149,8 +149,7 @@ def build_client(
             settings.max_memory_mb, settings.link_ttl_seconds,
             settings.force_mp4, settings.human_notice,
             settings.media_agents() or "open",
-            (settings.warmup_channel_id or "owner DM") if settings.warmup_enabled
-            else "off",
+            settings.warmup_channel_id or "off",
         )
         if not settings.channel_opt_in:
             log.info("channel opt-in disabled; acting wherever the allowlists permit")

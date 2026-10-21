@@ -313,13 +313,16 @@ bot cannot set an embed's `video` field** (Discord's Create Message docs
 exclude `provider`, `video` and image dimensions). Clients also sometimes don't
 re-render until you revisit the channel, which looks like the bot being slow.
 
-`WARMUP_ENABLED` (on by default) works around it by posting the link somewhere
-throwaway first, waiting until Discord has pulled the whole file, pausing
+`WARMUP_CHANNEL_ID` works around it by posting the link in a throwaway channel
+first, waiting until Discord has pulled the whole file, pausing
 `WARMUP_SETTLE_SECONDS`, deleting it, and only then posting publicly against
-Discord's now-warm per-URL cache. With no `WARMUP_CHANNEL_ID` it warms against
-**the application owner's DM**, which needs no configuration and is invisible
-to the server - a bot may DM a user it shares a guild with, and the owner of a
-bot in your own server qualifies. **The wait is on our own byte accounting, not
+Discord's now-warm per-URL cache.
+
+**It is off unless a channel is named, and there is deliberately no implicit
+target.** An earlier version warmed against the application owner's DM, which
+needed no configuration but meant the bot DMed a real person on every link.
+Warming has to post the link somewhere, so anywhere chosen on the user's behalf
+is a visible side effect nobody asked for. Don't reintroduce one. **The wait is on our own byte accounting, not
 a timer** - `Item.record_served` / `store.is_complete`, fed by the media route
 - because we serve the file and therefore know first-hand when Discord
 finished. Every failure path (no channel, failed post, timeout) falls back to
@@ -417,8 +420,7 @@ LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet 
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
-WARMUP_ENABLED=true             # warm Discord's unfurl cache before posting publicly
-WARMUP_CHANNEL_ID=0             # 0 = the app owner's DM; or a channel id in the guild
+WARMUP_CHANNEL_ID=0             # warm Discord's unfurl cache first; 0 = off
 WARMUP_TIMEOUT_SECONDS=20.0
 WARMUP_SETTLE_SECONDS=3.0
 LINK_NOTE=(clicking this link...)  # appended under the link; empty for none
