@@ -61,8 +61,12 @@ class BotSettings(BaseSettings):
 
     ack_text: str = "working on it\u2026"
     ack_failed_text: str = "could not fetch that one."
-    ack_emoji: str = "\u23f3"          # hourglass
-    ack_failed_emoji: str = "\u26a0\ufe0f"  # warning sign
+    # Left in place after the link lands, so the check reads as "handled"
+    # rather than flashing on and off; the link message is the real "done"
+    # signal. Set false to remove it once the link is posted.
+    ack_keep_reaction: bool = True
+    ack_emoji: str = "\u2705"        # white heavy check mark, renders green
+    ack_failed_emoji: str = "\u274c"  # cross mark
 
     # Posting the link is what makes Discord fetch it, so the player always
     # lands after the message. Warming works around that: post the link

@@ -288,9 +288,11 @@ contain the link would be tidier but relies on Discord unfurling an edited
 message, which is not something to bet the whole feature on. A failure says so
 rather than going quiet.
 
-`ACK_MODE=reaction` acknowledges with an emoji on the original message instead,
-which leaves nothing behind, but it needs Add Reactions on the channel and
-falls back to a message without it.
+`ACK_MODE=reaction` acknowledges with an emoji on the original message instead
+(default white check mark, red cross on failure). It needs Add Reactions on the
+channel and falls back to a message without it. `ACK_KEEP_REACTION` leaves the
+check in place afterwards, so it reads as "handled" rather than flashing on and
+off - the link message is the real completion signal.
 
 **Posting the link is what makes Discord fetch it**, so the player can only
 ever arrive after the message: there is no way to pre-attach it, because **a

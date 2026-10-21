@@ -165,9 +165,10 @@ class _Ack:
         await self._post()
 
     async def done(self) -> None:
-        """The link has landed, so remove the acknowledgement."""
+        """The link has landed, so withdraw the acknowledgement."""
         if self._reacted:
-            await self._unreact(self._settings.ack_emoji)
+            if not self._settings.ack_keep_reaction:
+                await self._unreact(self._settings.ack_emoji)
         elif self._note is not None:
             try:
                 await self._note.delete()
