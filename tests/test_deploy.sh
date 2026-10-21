@@ -91,17 +91,41 @@ if [ -f "$ROOT/systemd/gamtube-bot.service" ]; then
 fi
 if grep -q 'app\.main' "$ROOT/systemd/gamtube.service"; then
   echo " - FAIL unit still references app.main"; fails=$((fails+1)); fi
-check "bot reported disabled" 'Bot     : disabled'         "$ROOT/out.log"
+check "bot reported off"     'Bot     : off'              "$ROOT/out.log"
+check "bot absence explained" 'not configured, leaving it off' "$ROOT/out.log"
 check "obsolete unit retired" 'Removing the obsolete'     "$ROOT/out.log"
 if [ -f "$ROOT/systemd/gamtube-bot.service" ]; then
   echo " - FAIL leftover gamtube-bot.service was not removed"; fails=$((fails+1)); fi
 
-echo "== second run with a token set =="
-sed -i 's/^DISCORD_BOT_TOKEN=$/DISCORD_BOT_TOKEN=tok123/' "$env_file"
-PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep > "$ROOT/out2.log" 2>&1 || {
-  echo "FAIL: second run exited $?"; cat "$ROOT/out2.log"; exit 1; }
-check "token preserved"      '^DISCORD_BOT_TOKEN=tok123$'  "$env_file"
-check "bot reported enabled" 'Bot     : running inside gamtube'  "$ROOT/out2.log"
+echo "== the bot question is asked once, then never again =="
+# Run 1 recorded the answer as an empty value, so run 2 must not re-ask even
+# though the bot is off. This is what makes an unattended `make up` quiet.
+PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep > "$ROOT/out1b.log" 2>&1 || {
+  echo "FAIL: repeat run exited $?"; cat "$ROOT/out1b.log"; exit 1; }
+if grep -q 'not configured, leaving it off' "$ROOT/out1b.log"; then
+  echo " - FAIL re-asked about the bot after the answer was recorded"
+  fails=$((fails+1))
+fi
+check "still off"            '^DISCORD_BOT_TOKEN=$'       "$env_file"
+
+echo "== --bot-token enables it without a prompt =="
+PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep --bot-token tok123 \
+  > "$ROOT/out2.log" 2>&1 || {
+  echo "FAIL: --bot-token run exited $?"; cat "$ROOT/out2.log"; exit 1; }
+check "token written"        '^DISCORD_BOT_TOKEN=tok123$'  "$env_file"
+check "bot reported enabled" 'Bot     : enabled, inside gamtube'  "$ROOT/out2.log"
+
+echo "== a plain --keep keeps the token =="
+PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep > "$ROOT/out3.log" 2>&1 || {
+  echo "FAIL: keep-with-token run exited $?"; cat "$ROOT/out3.log"; exit 1; }
+check "token survives make up" '^DISCORD_BOT_TOKEN=tok123$' "$env_file"
+
+echo "== --no-bot turns it back off =="
+PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep --no-bot \
+  > "$ROOT/out4.log" 2>&1 || {
+  echo "FAIL: --no-bot run exited $?"; cat "$ROOT/out4.log"; exit 1; }
+check "token cleared"        '^DISCORD_BOT_TOKEN=$'        "$env_file"
+check "reported off again"   'Bot     : off'               "$ROOT/out4.log"
 
 # every key the bot reads must be parseable as KEY=value for systemd
 if grep -vE '^[A-Z0-9_]+=' "$env_file" | grep -q .; then

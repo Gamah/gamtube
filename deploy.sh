@@ -4,11 +4,16 @@
 # One service, gamtube (uvicorn web.main:app). The Discord bot runs inside it
 # when DISCORD_BOT_TOKEN is set — it has to, because the links it posts are
 # served from that process's memory.
-# Usage: sudo bash deploy.sh [--domain example.com] [--port 8000] [--data-dir DIR] [--keep]
+# Usage: sudo bash deploy.sh [--domain example.com] [--port 8000] [--data-dir DIR]
+#                            [--keep] [--bot-token TOKEN | --no-bot]
 #
 # Interactive by default: every setting is prompted with the value from the
 # existing /opt/gamtube/.env as its default, so pressing enter keeps it.
-#   --keep  skip all prompts entirely; reuse every existing value verbatim
+#   --keep  reuse every value already in .env without asking. Settings this
+#           version added that the existing .env has never seen are asked for
+#           once, and only when there's a terminal to ask on — so `make up`
+#           works unattended and over a pipe.
+#   --bot-token / --no-bot  answer the Discord bot question without a prompt
 # On a re-run, nothing is ever silently reset — a setting only changes if you
 # type a new value or pass a flag.
 set -euo pipefail
@@ -23,6 +28,8 @@ DATA_DIR=""
 KEEP=false
 DEPLOY_DIR="/opt/gamtube"
 TRANSCODE_ENABLED="false"
+BOT_EXPLICIT=false
+BOT_FLAG_TOKEN=""
 
 # --- parse args ---
 while [[ $# -gt 0 ]]; do
@@ -31,9 +38,18 @@ while [[ $# -gt 0 ]]; do
     --port)     PORT="$2"; PORT_EXPLICIT=true; shift 2 ;;
     --data-dir) DATA_DIR="$2"; shift 2 ;;
     --keep)     KEEP=true; shift ;;
+    --bot-token) BOT_FLAG_TOKEN="$2"; BOT_EXPLICIT=true; shift 2 ;;
+    --no-bot)   BOT_FLAG_TOKEN=""; BOT_EXPLICIT=true; shift ;;
     *) echo "Unknown arg: $1"; exit 1 ;;
   esac
 done
+
+# --- has this key ever been written? an empty value is still an answer, so
+# "blank" and "never asked" stay distinguishable across re-runs ---
+_env_has() {
+  [[ -f "$DEPLOY_DIR/.env" ]] || return 1
+  grep -qE "^$1=" "$DEPLOY_DIR/.env"
+}
 
 # --- read a key out of the existing .env, empty if absent ---
 _env_get() {
@@ -152,7 +168,9 @@ if [[ "$KEEP" != "true" ]]; then
   read -rp "Hours until a video expires, 0 = never [$VIDEO_TTL_HOURS]: " _input
   VIDEO_TTL_HOURS="${_input:-$VIDEO_TTL_HOURS}"
 
-  if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
+  if [[ "$BOT_EXPLICIT" == "true" ]]; then
+    DISCORD_BOT_TOKEN="$BOT_FLAG_TOKEN"
+  elif [[ -n "$DISCORD_BOT_TOKEN" ]]; then
     read -rsp "Discord bot token [blank = keep existing, '-' = disable bot]: " _input
     echo
     case "$_input" in
@@ -164,6 +182,28 @@ if [[ "$KEEP" != "true" ]]; then
     read -rsp "Discord bot token (blank = bot disabled): " _input
     echo
     DISCORD_BOT_TOKEN="$_input"
+  fi
+fi
+
+# --- --keep: fill in only what this .env has never been asked ---
+# A routine `make up` is silent. The first run after a version that adds a
+# setting asks for it once, then records the answer — including "no" — so it
+# never asks again. No terminal means no question: the default is written and
+# the deploy carries on.
+if [[ "$KEEP" == "true" ]]; then
+  if [[ "$BOT_EXPLICIT" == "true" ]]; then
+    DISCORD_BOT_TOKEN="$BOT_FLAG_TOKEN"
+  elif ! _env_has DISCORD_BOT_TOKEN; then
+    if [[ -t 0 ]]; then
+      echo "==> New in this version: a Discord bot that re-hosts links Discord won't embed."
+      echo "    Leave blank to skip it; you won't be asked again."
+      read -rsp "    Discord bot token [blank = disabled]: " _input
+      echo
+      DISCORD_BOT_TOKEN="$_input"
+    else
+      echo "==> Discord bot not configured, leaving it off."
+      echo "    Set DISCORD_BOT_TOKEN in $DEPLOY_DIR/.env and re-run to enable it."
+    fi
   fi
 fi
 
@@ -325,9 +365,10 @@ echo "==> Done."
 echo "    Service : systemctl status gamtube"
 echo "    Logs    : tail -f $DEPLOY_DIR/logs/app.log"
 if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
-  echo "    Bot     : running inside gamtube; grep gamtube.bot in the log"
+  echo "    Bot     : enabled, inside gamtube — make bot-logs"
+  echo "              grant the bot Embed Links on a channel to switch it on there"
 else
-  echo "    Bot     : disabled (no DISCORD_BOT_TOKEN)"
+  echo "    Bot     : off (no DISCORD_BOT_TOKEN) — see docs/bot.md to enable"
 fi
 echo "    yt-dlp  : systemctl list-timers gamtube-update-ytdlp.timer"
 echo "    Submit  : curl -X POST $BASE_URL/submit -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"

@@ -62,9 +62,21 @@ the bot's `/d/` links are both derived from it, and an `http://` value on an
 HTTPS site gets every video blocked as mixed content. `--domain` only ever
 produces `http://`.
 
-Updating an existing guest is `make up` (pull, re-deploy with `--keep`, print
-versions). `make status`, `make logs`, `make bot-logs` and `make update-ytdlp`
-cover the rest.
+Updating an existing guest is just:
+
+```bash
+make up
+```
+
+It pulls, re-deploys keeping every existing `.env` value, and prints versions.
+The first run after a version that adds a setting asks about it once and
+remembers the answer — including "no" — so later runs are silent. With no
+terminal attached it takes the defaults and carries on, so it's safe over a
+pipe or from a script.
+
+The Discord bot is opt-in: no token, no bot, and nothing about it to configure.
+`--bot-token TOKEN` or `--no-bot` answer that without a prompt. `make status`,
+`make logs`, `make bot-logs` and `make update-ytdlp` cover the rest.
 
 A daily timer upgrades yt-dlp and restarts the service only when the version
 actually moves — it's imported as a library, so nothing picks up a new

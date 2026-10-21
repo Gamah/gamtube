@@ -50,8 +50,11 @@ link route has no such ceiling, at the cost of the bet above.
 ### 1. Create the application
 
 In the Discord developer portal: **New Application** → **Bot** → copy the
-**token**. That token is the only required setting; `deploy.sh` prompts for it,
-and an empty token means the bot simply never starts.
+**token**. That token is the only required setting; `deploy.sh` asks for it once
+— including on a `make up` of an existing install — and an empty token means
+the bot never starts and nothing else about it needs configuring. You won't be
+asked again either way; `--bot-token TOKEN` and `--no-bot` set it without a
+prompt.
 
 ### 2. Enable the message content intent
 

@@ -407,11 +407,18 @@ sudo bash deploy.sh --domain your.domain.tld
 Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers one systemd unit: `gamtube` (uvicorn `web.main:app`), which carries the bot inside it.
 
 The bot is opt-in on the token alone — an empty `DISCORD_BOT_TOKEN` means
-`web/main.py` never starts the client. At the prompt, `-` clears an existing
-token. A leftover `gamtube-bot.service` from the earlier two-service layout is
-disabled and deleted on deploy. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
+`web/main.py` never starts the client, and every bot code path is skipped. At
+the prompt, `-` clears an existing token. A leftover `gamtube-bot.service` from
+the earlier two-service layout is disabled and deleted on deploy.
 
-Prompts for public base URL, data directory, admin password, transcoding, video TTL, and the Discord bot token. The bot's other settings are carried through from the existing `.env` rather than prompted, and defaulted on a first install. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** — a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` skips the prompts entirely; `--domain`/`--port`/`--data-dir` override non-interactively.
+**`make up` is the whole update, including a first-time bot setup.** It pulls,
+runs `deploy.sh --keep`, and prints versions. Adding a setting in a future
+version means adding it to the `EX_*` block, the defaults block and the `.env`
+heredoc — and, if it is a decision rather than a tunable, an `_env_has` prompt
+in the `--keep` branch. Tunables should just take their default silently;
+nobody wants a questionnaire on every deploy. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
+
+Prompts for public base URL, data directory, admin password, transcoding, video TTL, and the Discord bot token. The bot's other settings are carried through from the existing `.env` rather than prompted, and defaulted on a first install. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** — a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` reuses every value already in `.env` without asking, but **asks once for a setting the existing `.env` has never seen** — and only when stdin is a terminal, so `make up` is safe unattended and over a pipe. An answer of blank is still an answer: it is written to `.env`, which is why `_env_has` exists (an empty value and a missing key must stay distinguishable) and why the question never comes back. `--domain`/`--port`/`--data-dir` override non-interactively, and `--bot-token`/`--no-bot` answer the bot question in scripts.
 
 The base URL prompt takes a full URL including scheme, because `MEDIA_BASE_URL` is derived from it (`{BASE_URL}/media`) and an `http://` value on an HTTPS site gets every video blocked as mixed content. `--domain` only ever produces `http://`; type the URL at the prompt for HTTPS.
 
