@@ -5,8 +5,9 @@ pipeline:
 
 - **web** - paste a URL, get back a clean link at `your.domain/v/{id}`.
   [docs/web.md](docs/web.md)
-- **bot** - a Discord bot that replies with a playable link when someone posts
-  a TikTok, Instagram or Facebook link Discord won't embed.
+- **bot** - a Discord bot that replies with the video itself when someone posts
+  a TikTok, Instagram or Facebook link Discord won't embed: attached when it
+  fits the server's upload cap, otherwise as a playable link.
   [docs/bot.md](docs/bot.md)
 
 No accounts. No algorithm. No ads. Just the video.
@@ -39,6 +40,26 @@ make migrate
 make dev        # web on :8000, plus the bot if a token is set
 make test       # pure functions, /d/ routes, deploy.sh sandbox
 ```
+
+---
+
+## What the bot's reaction means
+
+It reacts to your message while it works, then swaps that for one emoji saying
+how it ended. The outcome one stays, so a channel's history reads back.
+
+| Emoji | Meaning |
+|---|---|
+| ⏳ | downloading and converting |
+| ✅ | attached natively, nothing else needed |
+| 📦 | posted a link instead: over the server's upload cap, or too long to fit it without wrecking it |
+| 🔒 | posted a link instead: the bot has no **Attach Files** in that channel |
+| 🐌 | posted a link instead: Discord throttled the upload |
+| 🤔 | posted a link instead: the upload failed some other way |
+| ❌ | nothing could be posted; the log says why |
+
+All seven are code defaults in `bot/config.py`.
+[docs/bot.md](docs/bot.md#what-the-reaction-means) has the longer version.
 
 ---
 

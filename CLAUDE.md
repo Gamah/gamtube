@@ -24,7 +24,8 @@ Submissions are public; anyone who can reach the server can submit a URL. Viewin
 gamtube/
 ├── core/                    # SHARED. no web, no Discord, no DB - stdlib + yt-dlp + ffmpeg
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
-│   ├── titles.py            # clean_title(): strips social-count noise from og:title
+│   ├── titles.py            # PURE: clean_title() og:title noise, safe_filename() attachments
+│   ├── mp4.py               # PURE: top-level box walk + compat_verdict (ok/remux/reencode)
 │   ├── downloader.py        # yt-dlp wrapper → info dict + video path + thumbnail path
 │   └── transcoder.py        # ffmpeg H.264 normalization, stream-copy if already H.264
 ├── web/
@@ -55,12 +56,13 @@ gamtube/
 │   ├── scope.py             # PURE: allowed_by_ids, opted_in - channel opt-in via permissions
 │   ├── store.py             # PURE: MemoryStore - TTL + byte-budget, oldest evicted first
 │   ├── ranges.py            # PURE: parse_range - HTTP Range, because Discord sends them
-│   └── handler.py           # rehost(): download → normalise → store → reply with the link
+│   ├── upload.py            # PURE: Outcome enum + plan() - attach, shrink to fit, or link
+│   └── handler.py           # rehost(): download → gate → attach, else store + link
 ├── docs/
 │   ├── web.md               # routes, processing, expiry, storage
 │   └── bot.md               # why attachments, Discord app setup, intents, tuning
 ├── tests/
-│   ├── test_pure.py         # detection, opt-in, store/eviction, ranges, titles
+│   ├── test_pure.py         # detection, opt-in, store/eviction, ranges, titles, upload plan, mp4 boxes
 │   ├── test_routes.py       # /d/ routes via TestClient; skips if fastapi is absent
 │   └── test_deploy.sh       # deploy.sh end to end against stubbed system commands
 ├── static/                  # style.css, awesome_face.svg
@@ -89,7 +91,7 @@ in `web/`, not `core/`. A `from web.config import ...` inside `core/` or `bot/`
 breaks that, and `bot/config.py` exists precisely so the bot never needs it.
 
 `core/downloader.download()` and `core/transcoder.transcode()` take keyword-only
-options (`fmt`, `writethumbnail`, `crf`, `max_height`) whose defaults reproduce
+options (`fmt`, `writethumbnail`, `crf`, `max_height`, `force_encode`) whose defaults reproduce
 the web app's behaviour exactly. The bot passes non-defaults to aim under
 Discord's upload cap; don't change a default to suit one caller.
 
@@ -172,7 +174,7 @@ Storage key is `{short_id}.{ext}` - flat, no subdirectory. Extension is `.mp4` w
 
 **`downloader.py`**: uses `yt_dlp.YoutubeDL` as a library. `format="bestvideo+bestaudio/best"`, `writethumbnail=True`. Output template is `video.%(ext)s`; the actual output file is found by globbing the temp dir and picking the largest non-image file. Returns `(info_dict, video_path, thumbnail_path | None)`. Uses `postprocessor_hooks` to emit indeterminate progress during the yt-dlp stream-merge phase (VP9+AAC → webm).
 
-**`transcoder.py`**: probes input with `ffprobe -show_streams -show_format` (JSON). If video codec is already `h264` and container is `mp4`, uses `-c copy`. Otherwise: `-c:v libx264 -crf 23 -preset superfast -c:a aac -b:a 128k`. `_duration_us()` checks both stream-level and format-level duration so mkv containers report progress correctly.
+**`transcoder.py`**: probes input with `ffprobe -show_streams -show_format` (JSON). If video codec is already `h264` and container is `mp4`, uses `-c copy -movflags +faststart` (a remux, which is also how the bot fixes a trailing `moov`); `force_encode=True` rules that out for a playable container with unplayable streams. Otherwise: `-c:v libx264 -crf 23 -preset superfast -pix_fmt yuv420p -c:a aac -b:a 128k -movflags +faststart`, with an even-dimension `scale` filter when no `max_height` downscale already supplies one. `_duration_us()` checks both stream-level and format-level duration so mkv containers report progress correctly.
 
 **`web/worker.py`** - three public functions, all called via `BackgroundTasks`:
 
@@ -187,7 +189,7 @@ Storage key is `{short_id}.{ext}` - flat, no subdirectory. Extension is `.mp4` w
 
 `reencode_video(short_id, storage)`: transcodes the already-stored raw file to H.264 MP4 in the background. Sets `status = reencoding` (video remains live for viewers during this), then `status = ready` + `transcoded=True` when done. Deletes the original raw file after the new MP4 is saved.
 
-Title cleanup: `core/titles.py` - `clean_title()` strips leading social-count noise that Facebook/Meta embeds in `og:title` (e.g. "1.2K views · 34 reactions · Actual Title" → "Actual Title").
+Title cleanup: `core/titles.py` - `clean_title()` strips leading social-count noise that Facebook/Meta embeds in `og:title` (e.g. "1.2K views · 34 reactions · Actual Title" → "Actual Title"). `safe_filename()` turns the same title into an attachment name, since Discord shows it above the player and a raw yt-dlp title has slashes, emoji and sometimes hundreds of characters.
 
 ---
 
@@ -278,19 +280,44 @@ copy once it has unfurled a link, so the link may then die. If Discord instead
 proxies every view from the origin, expiry leaves a dead embed in channel
 history. This was never measured - settle it by posting a link, waiting out the
 TTL and trying to play the embed from another account, and raise the TTL if it
-fails. Attachment upload would sidestep the question entirely but is capped by
-the guild's `filesize_limit`, which is why it isn't the default.
+fails. **It only applies to the fallback**: an attachment sidesteps the whole
+question, which is why it is now tried first.
 
-**If the upload path is revisited**, the pieces are: read `guild.filesize_limit`
-(it already accounts for boosts) and feed it to `_format_selector` in place of
-`MAX_ITEM_MB`; send `discord.File(io.BytesIO(item.data), filename=...)` instead
-of the link; and restore `core.titles.safe_filename`, removed in abe8a76, since
-Discord shows the attachment filename above the player and a raw yt-dlp title
-contains slashes, emoji and occasionally hundreds of characters. An upload needs
-no store entry, no `/d/` route, no TTL and no warmup, so it is a shorter path
-than the link one, not a longer one - the cap is its whole cost. Note
-`filesize<?` in the format selector is yt-dlp's own field and unrelated to
-Discord's limit; it keeps us from downloading something we would then reject.
+**Attachment first, link second.** `_upload_cap()` reads
+`guild.filesize_limit` (10/50/100 MiB by tier, boosts already included), and
+`bot/upload.py` `plan()` decides: under the cap, attach; over it, one shrink
+attempt aimed at the cap, but **only** when `UPLOAD_MIN_BITRATE_KBPS` (900,
+video plus audio) still fits the clip's probed duration. A three minute clip
+inside a 10 MiB cap is ~440 kbps and the link path serves it untouched, so that
+goes out as a link by design, not as a ruined attachment. Anything else - no
+Attach Files, a throttle, a 413, any exception - falls back to the link, and
+the fallback is total: a failed upload never leaves the user with nothing.
+`store.put` happens on the fallback path only, since an attachment needs no
+store entry, no `/d/` route, no TTL and no warmup. Note `filesize<?` in the
+format selector is yt-dlp's own field and unrelated to Discord's limit; it
+keeps us from downloading something we would then reject.
+
+**Rate limits need a deadline, not an exception handler.** discord.py answers a
+429 by sleeping `retry_after` and retrying up to five times, and raises
+`RateLimited` only when the client was built with `max_ratelimit_timeout` and
+the wait exceeds it - never for a global limit `[SOURCE: discord.py 2.7.1
+HTTPClient.request]`. `bot/client.py` does not set that option, so the upload
+is wrapped in `asyncio.wait_for(..., UPLOAD_TIMEOUT_SECONDS)` and a stall
+becomes a prompt fallback. Setting `max_ratelimit_timeout` on the client would
+complement that, not replace it.
+
+**A downloaded mp4 is not trusted as-is** (`_normalise` + `core/mp4.py`). The
+symptom is an embed that plays on mobile and stalls on desktop, and there are
+two causes. A `moov` index after `mdat` cannot be played over the ranged HTTP
+that `/d/{key}/f` serves; and 10 bit, 4:2:2 or 4:4:4 H.264, non-AAC audio or
+odd dimensions decode locally and nowhere a browser or Discord can. So the gate
+runs before the upload/link decision: pass means served as downloaded, a layout
+problem alone means a remux (`-c copy -movflags +faststart`), anything else
+means a full re-encode. `+faststart` is on **both** ffmpeg argument sets, so
+the web app's own output gets it too. `core/mp4.py` walks the top level boxes
+with stdlib arithmetic (ISO/IEC 14496-12 4.2, including the `size==1` 64 bit
+and `size==0` to-EOF forms) precisely so it is testable here, where ffmpeg is
+not installed.
 
 **The reply is two messages, not one edit.** Download plus any re-encode can
 run the better part of a minute, so `ACK_MODE` acknowledges immediately and the
@@ -300,13 +327,24 @@ contain the link would be tidier but relies on Discord unfurling an edited
 message, which is not something to bet the whole feature on. A failure says so
 rather than going quiet.
 
-`ACK_MODE=reaction` is the default: a white check mark on the original message,
-red cross on failure, and `ACK_KEEP_REACTION` leaves the check in place so it
-reads as "handled" rather than flashing on and off - the link message is the
-real completion signal. It needs **Add Reactions** on the channel and falls back
-to posting a message without it, which is quiet enough to be confusing, so
-`on_ready` adds `add_reactions` to the capability check in this mode and warns
-per channel.
+**The reaction is two markers, and the second one is a vocabulary.**
+`ACK_MODE=reaction` is the default: `EMOJI_WORKING` (hourglass) goes on while
+the work runs, and at the end it is swapped for exactly one outcome emoji -
+uploaded (check), over the cap (package), no Attach Files (lock), throttled
+(snail), other fallback (thinking face), nothing posted (cross). The outcome
+emoji stays as the "handled" marker, which is why `ACK_KEEP_REACTION` is gone:
+the check mark now means "attached natively" specifically and cannot double as
+"handled". `ACK_OUTCOME_REACTION=false` leaves no trail at all. Every emoji is
+a code default in `bot/config.py` and the set is tabulated in both
+`docs/bot.md` and `README.md` - a viewer who sees one must be able to look it
+up, so changing one means changing both tables. Each outcome also gets a log
+line naming the reason.
+
+Reaction mode needs **Add Reactions** on the channel and falls back to posting
+a message without it, which is quiet enough to be confusing, so `on_ready`
+adds `add_reactions` to the capability check in this mode and warns per
+channel. Attaching needs **Attach Files**; without it every clip still works,
+as a link with the lock emoji.
 
 **Posting the link is what makes Discord fetch it**, so the player can only
 ever arrive after the message: there is no way to pre-attach it, because **a
@@ -387,11 +425,12 @@ agent), per-stage timings, and polling the message during the wait so the real
 embed-arrival delay is measured rather than assumed. It costs extra Discord API
 calls, so it is off by default.
 
-`bot/detect.py`, `bot/scope.py`, `bot/store.py`, `bot/ranges.py` and
-`core/titles.py` are **pure and must stay that way** - they are the only parts
-of this feature that can be exercised without a Discord token, and `tests/`
-does exactly that. New link, filename, eviction or range logic goes there
-rather than inside the discord.py handlers or the FastAPI route.
+`bot/detect.py`, `bot/scope.py`, `bot/store.py`, `bot/ranges.py`,
+`bot/upload.py`, `core/titles.py` and `core/mp4.py` are **pure and must stay
+that way** - they are the only parts of this feature that can be exercised
+without a Discord token, and `tests/` does exactly that. New link, filename,
+eviction, range, upload-decision or mp4-layout logic goes there rather than
+inside the discord.py handlers or the FastAPI route.
 
 `EMBED_WAIT_SECONDS=3.0` is a guess, not a measurement. It needs tuning against
 a real guild; too low and links that would have embedded get re-hosted anyway.
@@ -420,12 +459,17 @@ EMBED_WAIT_SECONDS=3.0          # how long to let Discord unfurl before judging
 LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet above
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
+UPLOAD_ENABLED=true             # attach the file when it fits guild.filesize_limit
+UPLOAD_TIMEOUT_SECONDS=45.0     # one upload attempt, then fall back to the link
+UPLOAD_MIN_BITRATE_KBPS=900     # below this, don't shrink to fit; post the link
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
 WARMUP_CHANNEL_ID=0             # warm Discord's unfurl cache first; 0 = off
 WARMUP_TIMEOUT_SECONDS=20.0
 WARMUP_SETTLE_SECONDS=3.0
 LINK_NOTE=(clicking this link...)  # appended under the link; empty for none
-ACK_KEEP_REACTION=true          # leave the check on as a handled marker
+ACK_OUTCOME_REACTION=true       # swap the working marker for an outcome emoji
+EMOJI_WORKING=⏳ EMOJI_UPLOADED=✅ EMOJI_OVERSIZE=📦 EMOJI_FORBIDDEN=🔒
+EMOJI_THROTTLED=🐌 EMOJI_FALLBACK=🤔 EMOJI_FAILED=❌
 ACK_MODE=reaction               # reaction | message | none while downloading
 BOT_DEBUG=false                 # header dumps, stage timings, embed-arrival polling
 HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags
