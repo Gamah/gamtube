@@ -138,12 +138,14 @@ def build_client(
         log.info("connected as %s in %d guild(s)", client.user, len(client.guilds))
         log.info(
             "config: wait=%.1fs opt_in=%s/%s item<=%dMB store<=%dMB ttl=%ds "
-            "force_mp4=%s notice=%s media_gate=%s",
+            "force_mp4=%s notice=%s media_gate=%s warm=%s",
             settings.embed_wait_seconds, settings.channel_opt_in,
             settings.opt_in_permission, settings.max_item_mb,
             settings.max_memory_mb, settings.link_ttl_seconds,
             settings.force_mp4, settings.human_notice,
             settings.media_agents() or "open",
+            (settings.warmup_channel_id or "owner DM") if settings.warmup_enabled
+            else "off",
         )
         if not settings.channel_opt_in:
             log.info("channel opt-in disabled; acting wherever the allowlists permit")
@@ -219,7 +221,7 @@ def build_client(
             log.info("%d link(s) need rehosting", len(capped))
 
         for url in capped:
-            await rehost(fresh, url, settings, store, base_url)
+            await rehost(client, fresh, url, settings, store, base_url)
 
     return client
 

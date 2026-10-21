@@ -215,7 +215,41 @@ class _Ack:
             log.warning("could not remove the acknowledgement reaction")
 
 
+async def _warmup_target(
+    client: discord.Client, message: discord.Message, settings: BotSettings
+):
+    """Somewhere to post the link that nobody is looking at.
+
+    A configured channel wins. Otherwise the application owner's DM, which
+    needs no setup, is invisible to the server, and is a channel we can post in
+    and delete from. A bot can DM a user it shares a guild with, which the
+    owner of a bot in your own server is.
+    """
+    if settings.warmup_channel_id:
+        channel = (
+            message.guild.get_channel(settings.warmup_channel_id)
+            if message.guild is not None
+            else None
+        )
+        if channel is None:
+            log.warning("warmup channel %s not found in this guild",
+                        settings.warmup_channel_id)
+        return channel
+
+    try:
+        app = client.application or await client.application_info()
+        owner = app.owner or (app.team.owner if app.team else None)
+        if owner is None:
+            log.warning("could not identify the application owner to warm against")
+            return None
+        return owner.dm_channel or await owner.create_dm()
+    except discord.HTTPException:
+        log.warning("could not open the owner DM for warming")
+        return None
+
+
 async def _warm(
+    client: discord.Client,
     message: discord.Message,
     key: str,
     link: str,
@@ -237,12 +271,9 @@ async def _warm(
     Best effort throughout. A missing channel, a failed post or a timeout all
     just mean the link goes out unwarmed, which is the old behaviour.
     """
-    channel = None
-    if message.guild is not None:
-        channel = message.guild.get_channel(settings.warmup_channel_id)
+    channel = await _warmup_target(client, message, settings)
     if channel is None:
-        log.warning("warmup channel %s not found in this guild; posting unwarmed",
-                    settings.warmup_channel_id)
+        log.info("nowhere to warm against; posting unwarmed")
         return
 
     started = time.monotonic()
@@ -276,6 +307,7 @@ async def _warm(
 
 
 async def rehost(
+    client: discord.Client,
     message: discord.Message,
     url: str,
     settings: BotSettings,
@@ -308,8 +340,8 @@ async def rehost(
         store.put(key, item)
         link = f"{base_url.rstrip('/')}/d/{key}"
 
-        if settings.warmup_channel_id:
-            await _warm(message, key, link, settings, store)
+        if settings.warmup_enabled:
+            await _warm(client, message, key, link, settings, store)
 
         # The URL goes first and stays bare on its own line: Discord unfurls a
         # plain URL in a message that has other text, but not one wrapped in

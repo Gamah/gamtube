@@ -65,11 +65,15 @@ class BotSettings(BaseSettings):
     ack_failed_emoji: str = "\u26a0\ufe0f"  # warning sign
 
     # Posting the link is what makes Discord fetch it, so the player always
-    # lands after the message. Warming works around that: post the link in a
-    # throwaway channel first, wait until we have served the whole file (plus a
-    # settling pause), delete it, then post publicly against Discord's now-warm
-    # per-URL unfurl cache. 0 disables it and the link goes straight out.
-    # Must be a channel in the same guild that the bot can post in.
+    # lands after the message. Warming works around that: post the link
+    # somewhere throwaway first, wait until we have served the whole file (plus
+    # a settling pause), delete it, then post publicly against Discord's
+    # now-warm per-URL unfurl cache.
+    warmup_enabled: bool = True
+
+    # Where to warm. 0 means the application owner's DM, which needs no setup
+    # and is invisible to the server. Set a channel id to use that instead; it
+    # must be in the same guild and the bot must be able to post in it.
     warmup_channel_id: int = 0
     warmup_timeout_seconds: float = 20.0
     warmup_settle_seconds: float = 3.0

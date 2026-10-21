@@ -42,11 +42,9 @@ yt-dlp downloads into.
    emoji on the original, which leaves nothing behind but needs Add Reactions
    and falls back to a message without it), or `none`.
 
-   Note what this does *not* fix: the player appears when Discord finishes
-   unfurling, which is after our message lands, so for a moment the reply is a
-   bare link. A bot cannot set an embed's `video` field, so there is no way to
-   post the player pre-attached. Only an attachment upload avoids the gap, and
-   that is capped by the guild's `filesize_limit`.
+   Before that public post it **warms** the link, which is why the player
+   usually arrives with the message rather than filling in a second later. See
+   below.
 5. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
    with byte-range requests to build the player.
 6. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
@@ -62,6 +60,42 @@ That is cheap to settle once the bot is running: post a link, wait past the
 TTL, then try to play the embed from another account. If it still plays,
 Discord cached it. If it doesn't, raise `LINK_TTL_SECONDS` - or set it high
 enough that it stops mattering.
+
+### Warming the link
+
+Posting a link is what makes Discord fetch it, so left alone the player can
+only ever appear *after* the message: the reply sits there as a bare URL until
+Discord has read the page, pulled the video and pushed the embed, and clients
+sometimes don't re-render until you revisit the channel. There is no way to
+pre-attach it, because a bot cannot set an embed's `video` field.
+
+So with `WARMUP_ENABLED` (the default) the bot posts the link somewhere nobody
+is looking first, waits until **we** have served the whole file, pauses
+`WARMUP_SETTLE_SECONDS`, deletes it, and only then posts publicly - by which
+point Discord has the embed cached for that URL.
+
+The wait is on our own byte accounting rather than a timer. We serve the video,
+so "Discord has finished pulling it" is something we know first-hand instead of
+guessing; `WARMUP_TIMEOUT_SECONDS` caps it.
+
+Where it warms:
+
+- **nothing configured** - the application owner's DM. No setup, invisible to
+  the server, and a bot may DM a user it shares a guild with.
+- **`WARMUP_CHANNEL_ID`** - that channel instead. Same guild, and the bot needs
+  View Channels and Send Messages there.
+
+Every failure path falls back to posting unwarmed: no owner, DMs closed, a
+missing channel, a failed post, a timeout. `WARMUP_ENABLED=false` turns it off.
+
+Two things this assumes, neither documented by Discord: that the unfurl cache is
+shared across channels, and that a short settle is enough. The log settles it -
+a warmed link should produce **no second `page` fetch** when it goes out
+publicly:
+
+```bash
+grep -E 'warm |page |media ' /opt/gamtube/logs/app.log | tail -20
+```
 
 ### Why not an attachment
 
