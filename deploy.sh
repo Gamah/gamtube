@@ -44,6 +44,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# --- read a secret, echoing one '*' per character ---
+# `read -rs` shows nothing at all, which makes a long pasted token look like it
+# didn't register. Reading a character at a time lets us echo a mask instead.
+# Sets SECRET; never echoes the value itself.
+_read_secret() {
+  local prompt="$1" out="" ch
+  printf '%s' "$prompt"
+  while IFS= read -rsn1 ch; do
+    case "$ch" in
+      ""|$'\r')
+        break ;;                      # enter, or the CR half of a CRLF paste
+      $'\177'|$'\b')
+        if [[ -n "$out" ]]; then out="${out%?}"; printf '\b \b'; fi ;;
+      [[:cntrl:]])
+        : ;;                          # ignore stray control characters
+      *)
+        out+="$ch"; printf '*' ;;
+    esac
+  done
+  printf '\n'
+  SECRET="$out"
+}
+
 # --- has this key ever been written? an empty value is still an answer, so
 # "blank" and "never asked" stay distinguishable across re-runs ---
 _env_has() {
@@ -149,13 +172,11 @@ if [[ "$KEEP" != "true" ]]; then
   DATA_DIR="${_input:-$DATA_DIR}"
 
   if [[ -n "$ADMIN_PASSWORD" ]]; then
-    read -rsp "Admin password for /manage [blank = keep existing]: " _input
-    echo
-    ADMIN_PASSWORD="${_input:-$ADMIN_PASSWORD}"
+    _read_secret "Admin password for /manage [blank = keep existing]: "
+    ADMIN_PASSWORD="${SECRET:-$ADMIN_PASSWORD}"
   else
-    read -rsp "Admin password for /manage (blank = panel disabled): " _input
-    echo
-    ADMIN_PASSWORD="$_input"
+    _read_secret "Admin password for /manage (blank = panel disabled): "
+    ADMIN_PASSWORD="$SECRET"
   fi
 
   _transcode_hint="y/N"
@@ -171,17 +192,15 @@ if [[ "$KEEP" != "true" ]]; then
   if [[ "$BOT_EXPLICIT" == "true" ]]; then
     DISCORD_BOT_TOKEN="$BOT_FLAG_TOKEN"
   elif [[ -n "$DISCORD_BOT_TOKEN" ]]; then
-    read -rsp "Discord bot token [blank = keep existing, '-' = disable bot]: " _input
-    echo
-    case "$_input" in
+    _read_secret "Discord bot token [blank = keep existing, '-' = disable bot]: "
+    case "$SECRET" in
       "") ;;
       -)  DISCORD_BOT_TOKEN="" ;;
-      *)  DISCORD_BOT_TOKEN="$_input" ;;
+      *)  DISCORD_BOT_TOKEN="$SECRET" ;;
     esac
   else
-    read -rsp "Discord bot token (blank = bot disabled): " _input
-    echo
-    DISCORD_BOT_TOKEN="$_input"
+    _read_secret "Discord bot token (blank = bot disabled): "
+    DISCORD_BOT_TOKEN="$SECRET"
   fi
 fi
 
@@ -197,9 +216,8 @@ if [[ "$KEEP" == "true" ]]; then
     if [[ -t 0 ]]; then
       echo "==> New in this version: a Discord bot that re-hosts links Discord won't embed."
       echo "    Leave blank to skip it; you won't be asked again."
-      read -rsp "    Discord bot token [blank = disabled]: " _input
-      echo
-      DISCORD_BOT_TOKEN="$_input"
+      _read_secret "    Discord bot token [blank = disabled]: "
+      DISCORD_BOT_TOKEN="$SECRET"
     else
       echo "==> Discord bot not configured, leaving it off."
       echo "    Set DISCORD_BOT_TOKEN in $DEPLOY_DIR/.env and re-run to enable it."

@@ -59,6 +59,39 @@ check() { # check <label> <pattern> <file>
   if grep -qE -- "$2" "$3"; then :; else echo " - FAIL $1 (no match for: $2)"; fails=$((fails+1)); fi
 }
 
+echo "== masked secret input =="
+# Extract _read_secret and drive it from a pipe: read -rsn1 works on a
+# non-tty, so the assembly and backspace handling are testable without a pty.
+sed -n '/^_read_secret() {$/,/^}$/p' "$ROOT/deploy.sh" > "$ROOT/secret.sh"
+if [ ! -s "$ROOT/secret.sh" ]; then
+  echo " - FAIL could not extract _read_secret from deploy.sh"; fails=$((fails+1));
+fi
+
+_secret_case() { # _secret_case <label> <input> <expected>
+  local got
+  got="$(printf '%b' "$2" | bash -c "source '$ROOT/secret.sh'; _read_secret '' >/dev/null; printf '%s' \"\$SECRET\"")"
+  if [ "$got" != "$3" ]; then
+    echo " - FAIL $1 (got '$got', want '$3')"; fails=$((fails+1))
+  fi
+}
+
+_secret_case "plain token"        'MTIzNDU2.abc-DEF_789\n'  'MTIzNDU2.abc-DEF_789'
+_secret_case "stops at newline"   'tok123\nrest'            'tok123'
+_secret_case "CRLF paste trimmed" 'tok123\r\n'              'tok123'
+_secret_case "backspace deletes"  'tokX\177123\n'           'tok123'
+_secret_case "empty means blank"  '\n'                      ''
+_secret_case "dash preserved"     '-\n'                     '-'
+
+# and it must echo one star per character, never the value
+stars="$(printf 'abcd\n' | bash -c "source '$ROOT/secret.sh'; _read_secret 'pw: '")"
+case "$stars" in
+  *'****'*) ;;
+  *) echo " - FAIL mask did not print one star per character (got '$stars')"; fails=$((fails+1)) ;;
+esac
+case "$stars" in
+  *abcd*) echo " - FAIL the secret itself was echoed"; fails=$((fails+1)) ;;
+esac
+
 echo "== existing web values preserved =="
 check "BASE_URL kept"        '^BASE_URL=https://tube\.example\.com$' "$env_file"
 check "TTL kept"             '^VIDEO_TTL_HOURS=48$'                  "$env_file"
