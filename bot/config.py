@@ -22,10 +22,20 @@ class BotSettings(BaseSettings):
     # message. Too short and every link looks un-embedded; tune on a real guild.
     embed_wait_seconds: float = 3.0
 
-    # 0 = use the guild's own filesize_limit, which already accounts for boosts.
-    max_upload_mb: int = 0
+    # The link is served from RAM, so these are memory budgets, not Discord's
+    # upload cap — nothing is attached. A clip over max_item_mb is skipped.
+    max_item_mb: int = 100
+    max_memory_mb: int = 512
 
-    # One shrink attempt when the download lands over the cap.
+    # Seconds a posted link keeps working. Short on purpose: Discord only needs
+    # it long enough to unfurl. See bot/store.py for what this bets on.
+    link_ttl_seconds: int = 300
+
+    # Discord's embed player wants H.264 mp4; the format selector asks for it
+    # first, and this re-encodes anything that still arrives as something else.
+    force_mp4: bool = True
+
+    # One shrink attempt when the download lands over max_item_mb.
     shrink_enabled: bool = True
     shrink_crf: int = 30
     shrink_max_height: int = 720
@@ -35,6 +45,11 @@ class BotSettings(BaseSettings):
 
     # Cap on uploads from one message, so a link dump can't become a flood.
     max_links_per_message: int = 3
+
+    # Comma-separated user-agent substrings allowed to fetch the bytes; empty
+    # (default) serves anyone. A heuristic: Discord's proxy identifies itself,
+    # a human clicking the link does not.
+    serve_user_agents: str = ""
 
     bot_temp_dir: str | None = None
 

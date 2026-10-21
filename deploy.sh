@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # deploy.sh — bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
 #
-# Installs two services from one checkout and one venv:
-#   gamtube      — the web app (uvicorn, web.main:app)
-#   gamtube-bot  — the Discord bot (python -m bot), only when a token is set
+# One service, gamtube (uvicorn web.main:app). The Discord bot runs inside it
+# when DISCORD_BOT_TOKEN is set — it has to, because the links it posts are
+# served from that process's memory.
 # Usage: sudo bash deploy.sh [--domain example.com] [--port 8000] [--data-dir DIR] [--keep]
 #
 # Interactive by default: every setting is prompted with the value from the
@@ -57,7 +57,11 @@ EX_OPT_IN_PERMISSION="$(_env_get OPT_IN_PERMISSION)"
 EX_DISCORD_GUILDS="$(_env_get DISCORD_GUILDS)"
 EX_DISCORD_CHANNELS="$(_env_get DISCORD_CHANNELS)"
 EX_EMBED_WAIT="$(_env_get EMBED_WAIT_SECONDS)"
-EX_MAX_UPLOAD_MB="$(_env_get MAX_UPLOAD_MB)"
+EX_MAX_ITEM_MB="$(_env_get MAX_ITEM_MB)"
+EX_MAX_MEMORY_MB="$(_env_get MAX_MEMORY_MB)"
+EX_LINK_TTL="$(_env_get LINK_TTL_SECONDS)"
+EX_FORCE_MP4="$(_env_get FORCE_MP4)"
+EX_SERVE_UAS="$(_env_get SERVE_USER_AGENTS)"
 EX_MAX_LINKS="$(_env_get MAX_LINKS_PER_MESSAGE)"
 EX_SHRINK_ENABLED="$(_env_get SHRINK_ENABLED)"
 EX_SHRINK_CRF="$(_env_get SHRINK_CRF)"
@@ -93,7 +97,11 @@ OPT_IN_PERMISSION="${EX_OPT_IN_PERMISSION:-embed_links}"
 DISCORD_GUILDS="$EX_DISCORD_GUILDS"
 DISCORD_CHANNELS="$EX_DISCORD_CHANNELS"
 EMBED_WAIT_SECONDS="${EX_EMBED_WAIT:-3.0}"
-MAX_UPLOAD_MB="${EX_MAX_UPLOAD_MB:-0}"
+MAX_ITEM_MB="${EX_MAX_ITEM_MB:-100}"
+MAX_MEMORY_MB="${EX_MAX_MEMORY_MB:-512}"
+LINK_TTL_SECONDS="${EX_LINK_TTL:-300}"
+FORCE_MP4="${EX_FORCE_MP4:-true}"
+SERVE_USER_AGENTS="$EX_SERVE_UAS"
 MAX_LINKS_PER_MESSAGE="${EX_MAX_LINKS:-3}"
 SHRINK_ENABLED="${EX_SHRINK_ENABLED:-true}"
 SHRINK_CRF="${EX_SHRINK_CRF:-30}"
@@ -219,7 +227,11 @@ OPT_IN_PERMISSION=$OPT_IN_PERMISSION
 DISCORD_GUILDS=$DISCORD_GUILDS
 DISCORD_CHANNELS=$DISCORD_CHANNELS
 EMBED_WAIT_SECONDS=$EMBED_WAIT_SECONDS
-MAX_UPLOAD_MB=$MAX_UPLOAD_MB
+MAX_ITEM_MB=$MAX_ITEM_MB
+MAX_MEMORY_MB=$MAX_MEMORY_MB
+LINK_TTL_SECONDS=$LINK_TTL_SECONDS
+FORCE_MP4=$FORCE_MP4
+SERVE_USER_AGENTS=$SERVE_USER_AGENTS
 MAX_LINKS_PER_MESSAGE=$MAX_LINKS_PER_MESSAGE
 SHRINK_ENABLED=$SHRINK_ENABLED
 SHRINK_CRF=$SHRINK_CRF
@@ -260,28 +272,6 @@ StandardError=append:$DEPLOY_DIR/logs/app.log
 WantedBy=multi-user.target
 EOF
 
-echo "==> Installing Discord bot service"
-cat > /etc/systemd/system/gamtube-bot.service <<EOF
-[Unit]
-Description=gamtube Discord bot
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=$GAMTUBE_USER
-WorkingDirectory=$DEPLOY_DIR
-EnvironmentFile=$DEPLOY_DIR/.env
-ExecStart=$VENV/bin/python -m bot
-Restart=on-failure
-RestartSec=10
-StandardOutput=append:$DEPLOY_DIR/logs/bot.log
-StandardError=append:$DEPLOY_DIR/logs/bot.log
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
 echo "==> Installing yt-dlp auto-update timer"
 cat > /etc/systemd/system/gamtube-update-ytdlp.service <<EOF
 [Unit]
@@ -312,22 +302,21 @@ systemctl enable gamtube
 systemctl restart gamtube
 systemctl enable --now gamtube-update-ytdlp.timer
 
-# The bot is opt-in: no token, no service. Disabling is explicit so removing a
-# token actually stops it rather than leaving a crash-looping unit behind.
-if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
-  systemctl enable gamtube-bot
-  systemctl restart gamtube-bot
-else
+# An older install may have had the bot as its own unit; it lives in the web
+# process now, so retire the leftover rather than leaving it crash-looping.
+if [[ -f /etc/systemd/system/gamtube-bot.service ]]; then
+  echo "==> Removing the obsolete gamtube-bot service"
   systemctl disable --now gamtube-bot 2>/dev/null || true
+  rm -f /etc/systemd/system/gamtube-bot.service
+  systemctl daemon-reload
 fi
 
 echo ""
 echo "==> Done."
-echo "    Web     : systemctl status gamtube"
+echo "    Service : systemctl status gamtube"
 echo "    Logs    : tail -f $DEPLOY_DIR/logs/app.log"
 if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
-  echo "    Bot     : systemctl status gamtube-bot"
-  echo "    Bot log : tail -f $DEPLOY_DIR/logs/bot.log"
+  echo "    Bot     : running inside gamtube; grep gamtube.bot in the log"
 else
   echo "    Bot     : disabled (no DISCORD_BOT_TOKEN)"
 fi

@@ -45,40 +45,47 @@ gamtube/
 │   │   ├── submit.py        # GET / GET /submit (form) + POST /submit (public)
 │   │   ├── videos.py        # GET /v/{id}, /status.json, /progress (SSE), /scroll
 │   │   ├── feedback.py      # GET/POST /feedback
+│   │   ├── ephemeral.py     # /d/{key} og:video page + /d/{key}/f ranged bytes from RAM
 │   │   └── admin.py         # /manage panel: auth, list, renew, delete, unlist, nuke, reencode
 │   └── templates/           # self-contained pages; no shared base template
-├── bot/
-│   ├── __main__.py          # `python -m bot`: client, on_message, embed re-check, dispatch
+├── bot/                     # runs INSIDE the web process; see "Discord Bot" below
+│   ├── client.py            # build_client / run_client: on_message, embed re-check, dispatch
 │   ├── config.py            # BotSettings (pydantic-settings), guild/channel/domain parsing
 │   ├── detect.py            # PURE: extract_candidates, is_candidate, norm_url, unembedded
 │   ├── scope.py             # PURE: allowed_by_ids, opted_in — channel opt-in via permissions
-│   └── handler.py           # rehost(): download → size check → shrink → attachment reply
+│   ├── store.py             # PURE: MemoryStore — TTL + byte-budget, oldest evicted first
+│   ├── ranges.py            # PURE: parse_range — HTTP Range, because Discord sends them
+│   └── handler.py           # rehost(): download → normalise → store → reply with the link
 ├── docs/
 │   ├── web.md               # routes, processing, expiry, storage
 │   └── bot.md               # why attachments, Discord app setup, intents, tuning
 ├── tests/
-│   ├── test_pure.py         # link detection, opt-in predicates, titles/filenames
+│   ├── test_pure.py         # detection, opt-in, store/eviction, ranges, titles
+│   ├── test_routes.py       # /d/ routes via TestClient; skips if fastapi is absent
 │   └── test_deploy.sh       # deploy.sh end to end against stubbed system commands
 ├── static/                  # style.css, awesome_face.svg
 ├── media/                   # default MEDIA_ROOT (gitignored)
 ├── logs/                    # app.log + bot.log written by the systemd services (gitignored)
 ├── migrations/              # alembic; env.py reads DATABASE_URL from web.config
 ├── alembic.ini
-├── Makefile                 # up / status / logs / bot-logs / update-ytdlp / dev / dev-bot / migrate
-├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + two systemd units
-├── scripts/update-ytdlp.sh  # timer-driven yt-dlp upgrade; restarts BOTH services on a version change
+├── Makefile                 # up / status / logs / bot-logs / update-ytdlp / dev / migrate / test
+├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + one systemd unit
+├── scripts/update-ytdlp.sh  # timer-driven yt-dlp upgrade; restarts gamtube on a version change
 ├── .env.example
 ├── requirements.txt         # one venv for both processes; grouped shared / web / bot
 ├── README.md
 └── run.py                   # uvicorn web.main:app --reload
 ```
 
-**The `core/` boundary is the point of the layout.** `core/` imports nothing
-from `web/` or `bot/`, and the two front ends never import each other. Anything
-that needs `get_settings()`, a DB session or a storage backend belongs in
-`web/`, not `core/` — that is what kept the pipeline reusable by the bot in the
-first place. Keep it that way: a `from web.config import ...` inside `core/`
-breaks the bot.
+**Dependencies run exactly one way: `web/` → `bot/` → `core/`.** `core/`
+imports neither of the others, and `bot/` must never import `web/` — that is
+what keeps the bot's logic testable without FastAPI, a database or a token.
+`web/routers/ephemeral.py` importing `bot.store` is the one edge in the other
+direction, and it is deliberate: the route serves what the bot put in memory.
+
+Anything that needs `get_settings()`, a DB session or a storage backend belongs
+in `web/`, not `core/`. A `from web.config import ...` inside `core/` or `bot/`
+breaks that, and `bot/config.py` exists precisely so the bot never needs it.
 
 `core/downloader.download()` and `core/transcoder.transcode()` take keyword-only
 options (`fmt`, `writethumbnail`, `crf`, `max_height`) whose defaults reproduce
@@ -233,18 +240,35 @@ On every `POST /submit`, a `submitter_id` UUID4 is read from the request cookie 
 
 ## Discord Bot (`bot/`)
 
-Replies with the video as an **attachment** when someone posts a link Discord
-won't embed playably. See `docs/bot.md` for the Discord-side setup.
+Replies with a link Discord can unfurl when someone posts a URL it won't embed
+playably. `docs/bot.md` covers the Discord-side setup.
 
-**It does not use the web app at all** — no DB row, no storage backend, no
-expiry, no HTTP call to `/submit`. The file lives in a temp dir for the length
-of the upload and is then deleted; Discord's CDN holds the only copy
-afterwards. The two processes share `core/` and nothing else.
+**It runs inside the web app's process, not as its own service.** That is
+forced, not stylistic: the video is held in RAM by `bot/store.py` and served by
+`web/routers/ephemeral.py`, and two processes cannot share that memory. The
+client is started from `web/main.py`'s lifespan when `DISCORD_BOT_TOKEN` is
+set, and `bot.client.run_client` swallows everything but cancellation, so a bad
+token or gateway failure degrades to "no bot" instead of taking the web app
+down. Don't reintroduce a `gamtube-bot` unit; `deploy.sh` actively removes a
+leftover one.
 
-Why an attachment and not a `/v/{id}` link: an attachment transfers the bytes
-to Discord once and they serve it forever, whereas a link embed only stores a
-thumbnail and a URL, so every play is our bandwidth and the embed dies when
-`VIDEO_TTL_HOURS` deletes the file.
+It still touches **nothing** of the web app's data: no `videos` row, no storage
+backend, no expiry loop, no call to `/submit`. The only shared surface is the
+route and the store.
+
+**`/d/{key}`** renders the `og:video` page; **`/d/{key}/f`** serves the bytes
+with `206` range support, because Discord's media proxy fetches by range.
+`og:video:width`/`height` come from an ffprobe of the final file and are not
+decorative — without them Discord sizes the player wrongly or falls back to a
+plain card, which is the failure the bot exists to fix.
+
+**The TTL is a bet.** `LINK_TTL_SECONDS` (300) assumes Discord keeps its own
+copy once it has unfurled a link, so the link may then die. If Discord instead
+proxies every view from the origin, expiry leaves a dead embed in channel
+history. This was never measured — settle it by posting a link, waiting out the
+TTL and trying to play the embed from another account, and raise the TTL if it
+fails. Attachment upload would sidestep the question entirely but is capped by
+the guild's `filesize_limit`, which is why it isn't the default.
 
 **The trigger is the subtle part.** `on_message` fires before Discord has
 unfurled anything, so the message delivered to the handler never has embeds
@@ -260,18 +284,22 @@ Discord user suppresses an embed, so overriding it would be rude.
 
 **Per-channel opt-in is Discord's permission system, not bot state**
 (`bot/scope.py`). A channel is enabled when it carries an *explicit* permission
-overwrite granting the bot `OPT_IN_PERMISSION` (default `embed_links`).
-Discord stores it, so it survives restarts with no file, DB or command to sync.
-Three things deliberately don't count: base role permissions from the invite
-(not overwrites — which is why `docs/bot.md` tells you to leave Embed Links
-out of the invite), an `@everyone` overwrite (it would enable every channel at
-once), and category inheritance. Threads have no overwrites of their own —
-discord.py doesn't even give `Thread` an `overwrites_for` — so a thread follows
-its parent. `CHANNEL_OPT_IN=false` drops the requirement.
+overwrite granting the bot `OPT_IN_PERMISSION` (default `embed_links`, which is
+also the permission it needs for its reply to unfurl at all, so marker and
+capability can't disagree). Discord stores it, so it survives restarts with no
+file, DB or command to sync. Three things deliberately don't count: base role
+permissions from the invite (not overwrites — which is why `docs/bot.md` tells
+you to leave Embed Links out of the invite), an `@everyone` overwrite (it would
+enable every channel at once), and category inheritance. Threads have no
+overwrites of their own — discord.py doesn't even give `Thread` an
+`overwrites_for` — so a thread follows its parent. `CHANNEL_OPT_IN=false` drops
+the requirement.
 
-`bot/detect.py`, `bot/scope.py` and `core/titles.py` are **pure and must stay that way** — they
-are the only parts of the bot that can be exercised on a machine with no
-Discord token, and there is a harness that does so.
+`bot/detect.py`, `bot/scope.py`, `bot/store.py`, `bot/ranges.py` and
+`core/titles.py` are **pure and must stay that way** — they are the only parts
+of this feature that can be exercised without a Discord token, and `tests/`
+does exactly that. New link, filename, eviction or range logic goes there
+rather than inside the discord.py handlers or the FastAPI route.
 
 `EMBED_WAIT_SECONDS=3.0` is a guess, not a measurement. It needs tuning against
 a real guild; too low and links that would have embedded get re-hosted anyway.
@@ -297,7 +325,11 @@ OPT_IN_PERMISSION=embed_links   # validated against discord.Permissions at start
 DISCORD_GUILDS=                 # comma-separated guild ids; empty = all
 DISCORD_CHANNELS=               # comma-separated channel ids; empty = all
 EMBED_WAIT_SECONDS=3.0          # how long to let Discord unfurl before judging
-MAX_UPLOAD_MB=0                 # 0 = use the guild's filesize_limit (accounts for boosts)
+LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet above
+MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
+MAX_MEMORY_MB=512               # total store budget; oldest evicted first
+FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
+SERVE_USER_AGENTS=              # UA substrings allowed to fetch bytes; empty = anyone
 MAX_LINKS_PER_MESSAGE=3
 SHRINK_ENABLED=true             # one re-encode attempt when a download is over the cap
 SHRINK_CRF=30
@@ -346,12 +378,12 @@ make dev
 sudo bash deploy.sh --domain your.domain.tld
 ```
 
-Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates one venv for both processes, writes `.env`, runs migrations, and registers **two** systemd units: `gamtube` (uvicorn `web.main:app`) and `gamtube-bot` (`python -m bot`).
+Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers one systemd unit: `gamtube` (uvicorn `web.main:app`), which carries the bot inside it.
 
-The bot is opt-in on the token: `deploy.sh` enables and starts `gamtube-bot`
-when `DISCORD_BOT_TOKEN` is non-empty and explicitly `disable --now`s it when
-it is empty, so clearing the token actually stops the bot instead of leaving a
-crash-looping unit behind. At the prompt, `-` clears an existing token. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
+The bot is opt-in on the token alone — an empty `DISCORD_BOT_TOKEN` means
+`web/main.py` never starts the client. At the prompt, `-` clears an existing
+token. A leftover `gamtube-bot.service` from the earlier two-service layout is
+disabled and deleted on deploy. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
 
 Prompts for public base URL, data directory, admin password, transcoding, video TTL, and the Discord bot token. The bot's other settings are carried through from the existing `.env` rather than prompted, and defaulted on a first install. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** — a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` skips the prompts entirely; `--domain`/`--port`/`--data-dir` override non-interactively.
 
@@ -363,17 +395,15 @@ On an existing guest the whole update is `make up` (git pull --ff-only +
 
 `deploy.sh` also installs `gamtube-update-ytdlp.timer`: daily (randomised up to 2 h),
 it runs `scripts/update-ytdlp.sh`, which pip-upgrades yt-dlp in the venv and restarts
-**both** services only when the version actually moved. yt-dlp is imported as a library
-by each of them, so nothing picks up a new version without that restart — a new front
-end that imports yt-dlp has to be added to that script too. `requirements.txt` carries floors,
+`gamtube` only when the version actually moved. yt-dlp is imported as a library, so
+nothing — web app or bot — picks up a new version without that restart. `requirements.txt` carries floors,
 not pins, and the deploy installs with `--upgrade` so a re-run moves every dep forward.
 
 ```bash
 systemctl status gamtube
-systemctl status gamtube-bot
 systemctl list-timers gamtube-update-ytdlp.timer
 tail -f /opt/gamtube/logs/app.log
-tail -f /opt/gamtube/logs/bot.log
+tail -f /opt/gamtube/logs/app.log | grep gamtube.bot   # or: make bot-logs
 ```
 
 ---
@@ -383,10 +413,16 @@ tail -f /opt/gamtube/logs/bot.log
 Nothing engine-bound here, so most of this repo runs locally. What is worth
 knowing:
 
-- `core/titles.py` and `bot/detect.py` are pure stdlib and fully testable with
-  no token, no network and no venv. Keep new link-matching and filename logic
-  there rather than inside the discord.py handlers, which cannot be exercised
-  without a gateway connection.
+- `make test` runs everything that can run here: `tests/test_pure.py` (pure
+  stdlib, no deps at all), `tests/test_routes.py` (the `/d/` routes through
+  FastAPI's `TestClient`, skipping cleanly when fastapi isn't installed) and
+  `tests/test_deploy.sh`.
+- The pure modules listed under **Discord Bot** are testable with no token, no
+  network and no venv. Keep new logic there rather than in the discord.py
+  handlers, which cannot be exercised without a gateway connection.
+- `pip install --target` into a scratch dir plus `PYTHONPATH` is enough to run
+  the route tests without creating a venv (`python3 -m venv` has no ensurepip
+  on this host).
 - `deploy.sh` can be run end to end in a sandbox by pointing `DEPLOY_DIR` and
   the systemd path at temp directories and stubbing `apt-get`, `systemctl`,
   `useradd`, `rsync`, `chown`, `sudo` and `python3.12` on `PATH`. That catches

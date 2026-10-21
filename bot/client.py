@@ -1,22 +1,24 @@
-"""gamtube Discord bot — python -m bot
+"""The Discord gateway client.
 
-Watches for links from platforms Discord fails to embed playably, downloads
-them with yt-dlp and replies with the video as an attachment. Discord's CDN
-then holds the file; this process keeps nothing.
+Started from the web app's lifespan rather than its own process, because the
+videos it serves live in this process's memory (`bot.store`) and the route that
+serves them is `web/routers/ephemeral.py`. `run_client` is deliberately
+supervised: if the bot fails, it logs and returns, and the web app carries on.
 
-Channels opt in through Discord's own permissions — see bot/scope.py.
+This module imports nothing from `web/` — the dependency runs one way, so the
+bot's logic stays testable without FastAPI.
 """
 
 import asyncio
 import logging
-import sys
 
 import discord
 
-from bot.config import BotSettings, get_bot_settings
+from bot.config import BotSettings
 from bot.detect import extract_candidates, unembedded
 from bot.handler import rehost
 from bot.scope import allowed_by_ids, opted_in
+from bot.store import MemoryStore
 
 log = logging.getLogger("gamtube.bot")
 
@@ -37,7 +39,9 @@ def in_scope(message: discord.Message, settings: BotSettings) -> bool:
     return opted_in(guild.me, message.channel, settings.opt_in_permission)
 
 
-def build_client(settings: BotSettings) -> discord.Client:
+def build_client(
+    settings: BotSettings, store: MemoryStore, base_url: str
+) -> discord.Client:
     intents = discord.Intents.default()
     # Privileged. Enable it on the application's Bot page or every message
     # arrives with empty content and the bot sees no links at all.
@@ -89,30 +93,30 @@ def build_client(settings: BotSettings) -> discord.Client:
 
         todo = unembedded(fresh.embeds, candidates)[: settings.max_links_per_message]
         for url in todo:
-            await rehost(fresh, url, settings)
+            await rehost(fresh, url, settings, store, base_url)
 
     return client
 
 
-def main() -> int:
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s %(levelname)-5.5s [%(name)s] %(message)s",
-    )
-    settings = get_bot_settings()
-    if not settings.discord_bot_token:
-        print("DISCORD_BOT_TOKEN is not set; nothing to do.", file=sys.stderr)
-        return 1
+async def run_client(
+    settings: BotSettings, store: MemoryStore, base_url: str
+) -> None:
+    """Run the gateway client until cancelled, swallowing its failures.
+
+    Anything other than cancellation is logged and returns, so a bad token or a
+    gateway problem degrades to "no bot" rather than taking the web app down.
+    """
     if settings.opt_in_permission not in discord.Permissions.VALID_FLAGS:
-        print(
-            f"OPT_IN_PERMISSION={settings.opt_in_permission!r} is not a Discord "
-            "permission name.",
-            file=sys.stderr,
+        log.error(
+            "OPT_IN_PERMISSION=%r is not a Discord permission name; bot not started",
+            settings.opt_in_permission,
         )
-        return 1
-    build_client(settings).run(settings.discord_bot_token, log_handler=None)
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        return
+    try:
+        client = build_client(settings, store, base_url)
+        async with client:
+            await client.start(settings.discord_bot_token)
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        log.exception("Discord client stopped; the web app keeps running")

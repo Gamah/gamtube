@@ -5,8 +5,8 @@ pipeline:
 
 - **web** — paste a URL, get back a clean link at `your.domain/v/{id}`.
   [docs/web.md](docs/web.md)
-- **bot** — a Discord bot that replies with the video when someone posts a
-  TikTok, Instagram or Facebook link Discord won't embed.
+- **bot** — a Discord bot that replies with a playable link when someone posts
+  a TikTok, Instagram or Facebook link Discord won't embed.
   [docs/bot.md](docs/bot.md)
 
 No accounts. No algorithm. No ads. Just the video.
@@ -18,24 +18,26 @@ No accounts. No algorithm. No ads. Just the video.
 ```
 core/     yt-dlp + ffmpeg, short ids, title cleanup — no web, no Discord
 web/      FastAPI app: routes, templates, database, storage, expiry
-bot/      Discord client: link detection, download, attachment upload
+bot/      Discord client: link detection, download, in-memory store
 docs/     web.md, bot.md
+tests/    runs with no venv, no token, no network
 ```
 
-`core/` is the only shared code. The web app and the bot are separate
-processes, separate systemd units, and neither imports the other — the bot runs
-perfectly well with the web app stopped, and vice versa. They share one venv
-and one `.env`, each reading only its own keys.
+Dependencies run one way: `web/` imports `bot/`, `bot/` imports `core/`, and
+`core/` imports neither. One process serves both — the bot's links are held in
+memory and served from `/d/{id}`, so they cannot be split apart — but the bot
+is inert without `DISCORD_BOT_TOKEN`, and its failures are contained so the web
+app stays up regardless.
 
 ---
 
-## Run either one
+## Run it
 
 ```bash
 cp .env.example .env
 make migrate
-make dev        # web, on :8000
-make dev-bot    # bot (needs DISCORD_BOT_TOKEN)
+make dev        # web on :8000, plus the bot if a token is set
+make test       # pure functions, /d/ routes, deploy.sh sandbox
 ```
 
 ---
@@ -51,20 +53,21 @@ bash deploy.sh --domain your.domain.tld
 ```
 
 Installs Python 3.12 and ffmpeg, creates a service user and a venv, writes
-`.env`, runs migrations, and registers `gamtube` plus — if you give it a token —
-`gamtube-bot`. Every prompt is pre-filled from the existing `.env`, so pressing
-enter on a re-run keeps the current value and nothing is silently reset.
+`.env`, runs migrations, and registers the `gamtube` service. Every prompt is
+pre-filled from the existing `.env`, so pressing enter on a re-run keeps the
+current value and nothing is silently reset.
 
-The base URL prompt wants a full URL **including scheme**: `MEDIA_BASE_URL` is
-derived from it, and an `http://` value on an HTTPS site gets every video
-blocked as mixed content. `--domain` only ever produces `http://`.
+The base URL prompt wants a full URL **including scheme**: `MEDIA_BASE_URL` and
+the bot's `/d/` links are both derived from it, and an `http://` value on an
+HTTPS site gets every video blocked as mixed content. `--domain` only ever
+produces `http://`.
 
 Updating an existing guest is `make up` (pull, re-deploy with `--keep`, print
 versions). `make status`, `make logs`, `make bot-logs` and `make update-ytdlp`
 cover the rest.
 
-A daily timer upgrades yt-dlp and restarts both services only when the version
-actually moves — they import it as a library, so nothing picks up a new
+A daily timer upgrades yt-dlp and restarts the service only when the version
+actually moves — it's imported as a library, so nothing picks up a new
 extractor set without a restart.
 
 ---

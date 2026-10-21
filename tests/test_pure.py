@@ -10,7 +10,9 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
+from bot.ranges import parse_range
 from bot.scope import allowed_by_ids, opted_in
+from bot.store import Item, MemoryStore
 from core.titles import clean_title, safe_filename
 
 fails = []
@@ -205,6 +207,97 @@ eq("channel without overwrites_for",
 eq("guild with no default_role still checks roles",
    opted_in(Me([botrole], Guild(None)), Chan({botrole: Ov(embed_links=True)}),
             "embed_links"), True)
+
+
+# ---- ranges ----
+SIZE = 1000
+eq("no header", parse_range(None, SIZE), None)
+eq("empty header", parse_range("", SIZE), None)
+eq("explicit range", parse_range("bytes=0-99", SIZE), (0, 99))
+eq("open-ended range", parse_range("bytes=100-", SIZE), (100, 999))
+eq("suffix range", parse_range("bytes=-500", SIZE), (500, 999))
+eq("suffix longer than body", parse_range("bytes=-5000", SIZE), (0, 999))
+eq("end clamped to body", parse_range("bytes=0-99999", SIZE), (0, 999))
+eq("last byte", parse_range("bytes=999-999", SIZE), (999, 999))
+eq("whitespace tolerated", parse_range("bytes= 10-20 ", SIZE), (10, 20))
+eq("wrong unit ignored", parse_range("items=0-10", SIZE), None)
+eq("multi-range ignored", parse_range("bytes=0-10,20-30", SIZE), None)
+eq("garbage ignored", parse_range("bytes=abc", SIZE), None)
+eq("missing dash ignored", parse_range("bytes=10", SIZE), None)
+eq("inverted range ignored", parse_range("bytes=50-10", SIZE), None)
+eq("empty body", parse_range("bytes=0-10", 0), None)
+
+for label, header in [("start past end", "bytes=1000-1010"),
+                      ("open-ended past end", "bytes=1000-"),
+                      ("far past end, open-ended", "bytes=99999-"),
+                      ("zero suffix", "bytes=-0")]:
+    try:
+        parse_range(header, SIZE)
+        fails.append(f"{label}: expected ValueError, got a value")
+    except ValueError:
+        pass
+
+
+# ---- store ----
+class Clock:
+    def __init__(self):
+        self.t = 0.0
+
+    def __call__(self):
+        return self.t
+
+
+def item(n_bytes, **kw):
+    return Item(data=b"x" * n_bytes, content_type="video/mp4", **kw)
+
+
+clock = Clock()
+store = MemoryStore(ttl_seconds=10, max_bytes=1000, now=clock)
+
+store.put("a", item(100, title="A"))
+got = store.get("a")
+eq("roundtrip", got.title if got else None, "A")
+eq("size reported", store.total_bytes(), 100)
+eq("missing key", store.get("nope"), None)
+eq("contains", "a" in store, True)
+
+eq("fetch counter", store.get("a").fetches, 3)  # contains + the two gets above
+
+clock.t = 9.0
+eq("alive before ttl", store.get("a") is not None, True)
+clock.t = 11.0
+eq("expired after ttl", store.get("a"), None)
+eq("expiry frees bytes", store.total_bytes(), 0)
+
+# eviction: oldest first, once over budget
+store = MemoryStore(ttl_seconds=100, max_bytes=250, now=clock)
+store.put("one", item(100))
+store.put("two", item(100))
+store.put("three", item(100))
+eq("oldest evicted", store.get("one"), None)
+eq("newer kept", store.get("two") is not None, True)
+eq("newest kept", store.get("three") is not None, True)
+eq("within budget", store.total_bytes() <= 250, True)
+
+# an item larger than the whole budget does not wedge the store
+store = MemoryStore(ttl_seconds=100, max_bytes=100, now=clock)
+store.put("huge", item(500))
+eq("oversized item dropped", len(store), 0)
+
+# re-putting refreshes position, so it is no longer the eviction candidate
+store = MemoryStore(ttl_seconds=100, max_bytes=250, now=clock)
+store.put("x", item(100))
+store.put("y", item(100))
+store.put("x", item(100))
+store.put("z", item(100))
+eq("refreshed key survives", store.get("x") is not None, True)
+eq("stale key evicted", store.get("y"), None)
+
+# ttl of 0 disables expiry
+store = MemoryStore(ttl_seconds=0, max_bytes=1000, now=clock)
+store.put("forever", item(10))
+clock.t += 10_000
+eq("ttl 0 never expires", store.get("forever") is not None, True)
 
 if fails:
     print(f"FAIL ({len(fails)})")

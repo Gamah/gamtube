@@ -46,6 +46,9 @@ EOF
 mkdir -p "$ROOT/systemd"
 printf 'ExecStart=/x/uvicorn app.main:app --host 0.0.0.0 --port 8123\n' \
   > "$ROOT/systemd/gamtube.service"
+# a leftover from the old layout, which this deploy must retire
+printf '[Service]\nExecStart=/x/python -m bot\n' \
+  > "$ROOT/systemd/gamtube-bot.service"
 
 PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep > "$ROOT/out.log" 2>&1 || {
   echo "FAIL: deploy.sh exited $?"; cat "$ROOT/out.log"; exit 1; }
@@ -65,7 +68,10 @@ check "admin password kept"  '^ADMIN_PASSWORD=sekrit$'               "$env_file"
 echo "== bot keys added with defaults, token left empty =="
 check "token empty"          '^DISCORD_BOT_TOKEN=$'                  "$env_file"
 check "embed wait default"   '^EMBED_WAIT_SECONDS=3\.0$'             "$env_file"
-check "upload cap default"   '^MAX_UPLOAD_MB=0$'                     "$env_file"
+check "link ttl default"     '^LINK_TTL_SECONDS=300$'               "$env_file"
+check "item cap default"     '^MAX_ITEM_MB=100$'                    "$env_file"
+check "memory cap default"   '^MAX_MEMORY_MB=512$'                  "$env_file"
+check "force mp4 default"    '^FORCE_MP4=true$'                     "$env_file"
 check "max links default"    '^MAX_LINKS_PER_MESSAGE=3$'             "$env_file"
 check "shrink default"       '^SHRINK_ENABLED=true$'                 "$env_file"
 check "shrink crf default"   '^SHRINK_CRF=30$'                       "$env_file"
@@ -76,18 +82,23 @@ check "opt-in permission"    '^OPT_IN_PERMISSION=embed_links$'      "$env_file"
 echo "== units =="
 check "web runs web.main"    'uvicorn web\.main:app'       "$ROOT/systemd/gamtube.service"
 check "port read from unit"  '--port 8123'                 "$ROOT/systemd/gamtube.service"
-check "bot unit written"     'ExecStart=.*/python -m bot'  "$ROOT/systemd/gamtube-bot.service"
-check "bot logs separately"  'logs/bot\.log'               "$ROOT/systemd/gamtube-bot.service"
+if [ -f "$ROOT/systemd/gamtube-bot.service" ]; then
+  echo " - FAIL a separate bot unit was written; the bot runs inside gamtube"
+  fails=$((fails+1))
+fi
 if grep -q 'app\.main' "$ROOT/systemd/gamtube.service"; then
   echo " - FAIL unit still references app.main"; fails=$((fails+1)); fi
 check "bot reported disabled" 'Bot     : disabled'         "$ROOT/out.log"
+check "obsolete unit retired" 'Removing the obsolete'     "$ROOT/out.log"
+if [ -f "$ROOT/systemd/gamtube-bot.service" ]; then
+  echo " - FAIL leftover gamtube-bot.service was not removed"; fails=$((fails+1)); fi
 
 echo "== second run with a token set =="
 sed -i 's/^DISCORD_BOT_TOKEN=$/DISCORD_BOT_TOKEN=tok123/' "$env_file"
 PATH="$ROOT/stub:$PATH" bash "$ROOT/deploy.sh" --keep > "$ROOT/out2.log" 2>&1 || {
   echo "FAIL: second run exited $?"; cat "$ROOT/out2.log"; exit 1; }
 check "token preserved"      '^DISCORD_BOT_TOKEN=tok123$'  "$env_file"
-check "bot reported enabled" 'Bot     : systemctl status'  "$ROOT/out2.log"
+check "bot reported enabled" 'Bot     : running inside gamtube'  "$ROOT/out2.log"
 
 # every key the bot reads must be parseable as KEY=value for systemd
 if grep -vE '^[A-Z0-9_]+=' "$env_file" | grep -q .; then

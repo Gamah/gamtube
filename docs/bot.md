@@ -2,30 +2,46 @@
 
 Discord gives TikTok, Instagram, Facebook and Reddit links a dead link-card
 with nothing to play. The bot watches for those links, downloads the video with
-yt-dlp and replies with it as an **attachment**, so Discord's own player handles
-it and Discord's CDN holds the file.
+yt-dlp, holds it in memory for a few minutes, and replies with a URL that
+Discord unfurls into a working player.
 
-It does not use the web app. No database row, no storage backend, no expiry —
-the file exists in a temp directory for as long as the upload takes and is then
-deleted. The two processes share only `core/`.
+It runs **inside the web app's process**, and `/d/{id}` is its route. That is
+not an aesthetic choice: the video lives in this process's RAM, and a separate
+process could not serve it. Nothing is written to the database, the storage
+backend or the `videos` table, and nothing touches disk beyond the temp file
+yt-dlp downloads into.
 
 ---
 
-## Why an attachment and not a link
+## The lifecycle
 
-An attachment and a link are different mechanisms, and only one of them is
-actually hosting:
+1. Someone posts a TikTok link. Discord renders a useless card.
+2. The bot downloads the video, normalises it to H.264 mp4 if it isn't
+   already, and puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
+3. It replies with `https://your.domain/d/{id}` — a bare URL, because wrapping
+   it in `<>` or markdown suppresses the embed, which is the one thing needed.
+4. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
+   with byte-range requests to build the player.
+5. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
+   404s.
 
-- **Attachment** — Discord accepts the bytes, stores them, serves them. Your
-  server is out of the loop afterwards, and the video survives indefinitely.
-- **Link** — Discord reads your `og:` tags and renders a player pointed at
-  *your* URL. Every play is your bandwidth, and when `VIDEO_TTL_HOURS` deletes
-  the file the embed in channel history goes dead.
+### The assumption this rests on
 
-The attachment route costs an upload cap: Discord accepts up to the guild's
-`filesize_limit`, which rises with boost level. That is fine for the content
-this is for — short-form clips are small, and the videos Discord fails to embed
-are precisely the ones that fit.
+Step 5 is a bet: that once Discord has unfurled a link it holds its own copy,
+so the link may expire. **If Discord instead proxies each view from the origin,
+an expired item means a dead embed in channel history.**
+
+That is cheap to settle once the bot is running: post a link, wait past the
+TTL, then try to play the embed from another account. If it still plays,
+Discord cached it. If it doesn't, raise `LINK_TTL_SECONDS` — or set it high
+enough that it stops mattering.
+
+### Why not an attachment
+
+Uploading the file as an attachment would make Discord the host outright, with
+no link and no TTL question at all. The catch is the attachment cap: Discord
+takes up to the guild's `filesize_limit`, which is small without boosts. The
+link route has no such ceiling, at the cost of the bet above.
 
 ---
 
@@ -34,7 +50,8 @@ are precisely the ones that fit.
 ### 1. Create the application
 
 In the Discord developer portal: **New Application** → **Bot** → copy the
-**token**. That token is the only required setting.
+**token**. That token is the only required setting; `deploy.sh` prompts for it,
+and an empty token means the bot simply never starts.
 
 ### 2. Enable the message content intent
 
@@ -61,16 +78,12 @@ out what Discord managed to embed.
 **Do not grant Embed Links here.** That one is granted per channel, and it is
 what opts a channel in.
 
-### 4. Configure and start
+### 4. Check the public URL
 
-Put the token in `.env`:
-
-```
-DISCORD_BOT_TOKEN=...
-```
-
-`deploy.sh` prompts for it and enables `gamtube-bot` when it is set; an empty
-token leaves the service disabled. Locally, `make dev-bot`.
+The reply links to `{BASE_URL}/d/{id}`, so `BASE_URL` has to be what the
+outside world actually reaches, scheme included. Since `/d/` is served by the
+same app on the same port as everything else, a reverse proxy that already
+fronts gamtube needs no new routing.
 
 ---
 
@@ -86,9 +99,9 @@ Removing that overwrite opts the channel back out. There is no command and no
 stored state: Discord is the record, so it survives restarts and redeploys, and
 there is nothing to keep in sync.
 
-This is deliberately the same permission the bot needs to do its job, so the
-two can't disagree — a channel where it isn't opted in is a channel where it
-physically cannot upload.
+It is also the permission the bot genuinely needs — without Embed Links its
+reply posts as plain text and never unfurls — so the marker and the capability
+cannot disagree.
 
 What does **not** count as opting in:
 
@@ -100,12 +113,11 @@ What does **not** count as opting in:
 - **Inheriting from a category.** Only an overwrite on the channel itself (or,
   for a thread, on its parent channel) counts.
 
-Threads have no permissions of their own, so a thread follows its parent
-channel.
+Threads have no permissions of their own, so a thread follows its parent.
 
 On connect the bot logs which channels are enabled in each guild, and warns
 when a guild has none — an opt-in bot with nothing granted looks identical to a
-broken one, so check `logs/bot.log` first:
+broken one, so check the log first:
 
 ```
 INFO  gamtube.bot  my-server: enabled in clips, memes
@@ -115,15 +127,16 @@ WARN  gamtube.bot  other-server: no channel grants embed_links to the bot, so it
 Set `CHANNEL_OPT_IN=false` to drop the requirement and act anywhere
 `DISCORD_GUILDS` / `DISCORD_CHANNELS` permit. `OPT_IN_PERMISSION` changes which
 permission is the marker; it is validated against Discord's permission names at
-startup, so a typo fails loudly instead of silently disabling the bot.
+startup, so a typo is logged and the bot doesn't start rather than silently
+doing nothing.
 
 ---
 
 ## How it decides to act
 
-1. A message arrives in an opted-in channel. Links are matched against `WATCH_DOMAINS` (default list
-   in `bot/detect.py`) — a cheap prefilter so unrelated links never cost a
-   yt-dlp call.
+1. A message arrives in an opted-in channel. Links are matched against
+   `WATCH_DOMAINS` (default list in `bot/detect.py`) — a cheap prefilter so
+   unrelated links never cost a yt-dlp call.
 2. Links wrapped as `<https://...>` are skipped. That syntax is how a user
    deliberately suppresses an embed, so the bot honours it.
 3. The bot waits `EMBED_WAIT_SECONDS`, then **re-reads the message**. Embeds
@@ -135,25 +148,34 @@ startup, so a typo fails loudly instead of silently disabling the bot.
 5. Anything left over is downloaded and posted, up to
    `MAX_LINKS_PER_MESSAGE`.
 
-The format selector prefers H.264/AAC that already fits under the cap, so the
-common case needs no ffmpeg at all. If the download still lands over the cap
-and `SHRINK_ENABLED` is on, there is one re-encode attempt at `SHRINK_CRF` and
-`SHRINK_MAX_HEIGHT`; if that is still too big, the bot gives up quietly.
+The format selector prefers H.264/AAC under `MAX_ITEM_MB`, so the common case
+needs no ffmpeg at all. Over that, `SHRINK_ENABLED` buys one re-encode attempt
+at `SHRINK_CRF` / `SHRINK_MAX_HEIGHT`; still over, and the link is skipped
+quietly. `FORCE_MP4` re-encodes anything that arrives in another container,
+because mp4/H.264 is what Discord's player handles everywhere, iOS included.
+
+`og:video:width` and `og:video:height` are emitted from an ffprobe of the final
+file. They are not decorative: without them Discord sizes the player badly or
+degrades the embed to a plain card, which is the exact failure this bot exists
+to fix.
 
 ---
 
-## Tuning
+## Memory
 
-`EMBED_WAIT_SECONDS` is the one setting you should expect to change. Three
-seconds is a guess — the real value depends on how fast Discord unfurls each
-platform. Too short and links that *would* have embedded get re-hosted
-anyway; too long and the reply feels detached from the message. Watch
-`logs/bot.log` on a real guild and adjust.
+Everything is held in RAM, so there are two budgets:
 
-`DISCORD_GUILDS` and `DISCORD_CHANNELS` are a coarser filter applied before
-the opt-in check — useful for keeping a bot that is in several servers working
-in only one of them. With `CHANNEL_OPT_IN=true` they are usually unnecessary,
-since a channel that grants nothing is already excluded.
+- `MAX_ITEM_MB` (100) — skip any single video bigger than this.
+- `MAX_MEMORY_MB` (512) — total across all live links; oldest evicted first
+  when over, regardless of TTL.
+
+With a 300-second TTL the store only ever holds the last few minutes of
+activity, so the steady state sits far below the budget. Eviction is there for
+the pathological case, not the normal one.
+
+`SERVE_USER_AGENTS` optionally restricts who may fetch the bytes to a list of
+user-agent substrings. It is a heuristic — Discord's proxy identifies itself, a
+human clicking the link does not — so the default is empty and serves anyone.
 
 ---
 
@@ -163,9 +185,9 @@ since a channel that grants nothing is already excluded.
   message. You get the working video *plus* their broken card, unless you give
   it Manage Messages and let it delete and repost on the user's behalf — a much
   more intrusive bot, and not what this is.
-- **Remember anything across restarts.** Dedup is an in-process set, so the
-  same link posted in the same channel is downloaded once while the process
-  lives and again after a restart.
+- **Survive a restart.** The store is memory only, so every link the bot has
+  posted dies when the service restarts. Given the short TTL that is usually
+  indistinguishable from normal expiry.
 - **Handle links inside code blocks or spoiler tags.** They are treated like
   any other text.
 
@@ -173,11 +195,15 @@ since a channel that grants nothing is already excluded.
 
 ## Operations
 
+The bot has no service of its own. It starts and stops with `gamtube`, logs
+under the `gamtube.bot` logger, and `run_client` swallows its own failures, so
+a bad token or a gateway problem degrades to "no bot" rather than taking the
+web app down with it.
+
 ```bash
-systemctl status gamtube-bot
-tail -f /opt/gamtube/logs/bot.log      # or: make bot-logs
+systemctl status gamtube
+make bot-logs      # tails app.log filtered to gamtube.bot
 ```
 
-`gamtube-update-ytdlp.timer` restarts the bot along with the web app whenever
-yt-dlp actually moves. Both import yt-dlp as a library, so neither picks up a
-new version without a restart.
+`gamtube-update-ytdlp.timer` restarts `gamtube` whenever yt-dlp actually moves,
+which picks up the new extractor set for the bot at the same time.

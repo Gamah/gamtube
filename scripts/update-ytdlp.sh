@@ -18,10 +18,7 @@ if [ "$before" = "$after" ]; then
   exit 0
 fi
 
-# Both processes import yt-dlp as a library, so neither picks up a new version
-# without a restart. Skip the bot when it isn't enabled.
-echo "yt-dlp $before -> $after; restarting services"
+# yt-dlp is imported as a library by the web app and by the bot inside it, so
+# nothing picks up a new version without this restart.
+echo "yt-dlp $before -> $after; restarting gamtube"
 systemctl restart gamtube
-if systemctl is-enabled --quiet gamtube-bot 2>/dev/null; then
-  systemctl restart gamtube-bot
-fi

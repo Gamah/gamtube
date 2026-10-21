@@ -1,8 +1,10 @@
-"""Download a link and reply with it as a Discord attachment.
+"""Download a link, hold it in RAM, and reply with a URL Discord will unfurl.
 
-Nothing here touches the web app's database or storage backend: the file lives
-in a temp dir for as long as the upload takes and is then deleted. Once the
-attachment is posted, Discord holds the only copy.
+Nothing is attached and nothing is written to the database: the bytes sit in
+`bot.store.MemoryStore` for a few minutes, which is as long as Discord needs to
+fetch the video and build its embed. The reply is a bare URL so Discord
+actually unfurls it — wrapping it in `<>` or markdown suppresses the embed,
+which is the one thing we need.
 """
 
 import asyncio
@@ -14,27 +16,17 @@ from pathlib import Path
 import discord
 
 from bot.config import BotSettings
+from bot.store import Item, MemoryStore
 from core.downloader import download
 from core.ids import short_id_for
-from core.titles import clean_title, safe_filename
-from core.transcoder import transcode
+from core.titles import clean_title
+from core.transcoder import _probe, transcode
 
 log = logging.getLogger("gamtube.bot")
-
-# Discord's base attachment cap, used only for DMs, where there is no guild to
-# read filesize_limit from. Conservative on purpose; override with MAX_UPLOAD_MB.
-DM_UPLOAD_LIMIT = 10 * 1024 * 1024
 
 # Work already running, keyed "{channel_id}:{short_id}", so the same link
 # pasted twice in quick succession is downloaded once. Process-local by design.
 _inflight: set[str] = set()
-
-
-def upload_limit(message: discord.Message, settings: BotSettings) -> int:
-    if settings.max_upload_mb > 0:
-        return settings.max_upload_mb * 1024 * 1024
-    guild = message.guild
-    return guild.filesize_limit if guild else DM_UPLOAD_LIMIT
 
 
 def _format_selector(cap: int) -> str:
@@ -51,52 +43,105 @@ def _format_selector(cap: int) -> str:
     )
 
 
-async def rehost(message: discord.Message, url: str, settings: BotSettings) -> bool:
-    """Download `url` and reply to `message` with it. True if something was posted."""
-    key = f"{message.channel.id}:{short_id_for(url)}"
-    if key in _inflight:
+def _dimensions(path: Path) -> tuple[int | None, int | None, int | None]:
+    """(width, height, duration_seconds) — og:video:width/height matter.
+
+    Without dimensions Discord sizes the player badly or degrades the embed to
+    a plain card, which is the failure this whole bot exists to avoid.
+    """
+    try:
+        probe = _probe(path)
+    except Exception:
+        return None, None, None
+    stream = next(
+        (s for s in probe.get("streams", []) if s.get("codec_type") == "video"), {}
+    )
+    duration = probe.get("format", {}).get("duration") or stream.get("duration")
+    try:
+        seconds = int(float(duration)) if duration else None
+    except (TypeError, ValueError):
+        seconds = None
+    return stream.get("width"), stream.get("height"), seconds
+
+
+def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
+    """Blocking half: download, normalise, measure. Runs in a worker thread."""
+    cap = settings.max_item_mb * 1024 * 1024
+    info, src, _ = download(
+        url, tmp, None, fmt=_format_selector(cap), writethumbnail=False
+    )
+    size = src.stat().st_size
+
+    if size > cap and settings.shrink_enabled:
+        shrunk = tmp / "shrunk.mp4"
+        log.info("%s is %.1fMB, over the %dMB item cap; shrinking",
+                 url, size / 1048576, settings.max_item_mb)
+        transcode(src, shrunk, None,
+                  crf=settings.shrink_crf, max_height=settings.shrink_max_height)
+        if shrunk.exists() and shrunk.stat().st_size < size:
+            src, size = shrunk, shrunk.stat().st_size
+
+    if size > cap:
+        log.info("skip %s — %.1fMB still over the %dMB item cap",
+                 url, size / 1048576, settings.max_item_mb)
+        return None
+
+    if settings.force_mp4 and src.suffix.lower() != ".mp4":
+        # Discord's embed player is fed the URL directly; mp4/H.264 is the only
+        # container it plays everywhere, iOS included.
+        mp4 = tmp / "forced.mp4"
+        log.info("%s arrived as %s; normalising to mp4", url, src.suffix)
+        transcode(src, mp4, None)
+        src = mp4
+        size = src.stat().st_size
+        if size > cap:
+            log.info("skip %s — %.1fMB after mp4 normalisation", url, size / 1048576)
+            return None
+
+    width, height, duration = _dimensions(src)
+    return Item(
+        data=src.read_bytes(),
+        content_type="video/mp4" if src.suffix.lower() == ".mp4" else "video/webm",
+        title=clean_title(info.get("title")),
+        width=width,
+        height=height,
+        duration=duration,
+        source_url=url,
+    )
+
+
+async def rehost(
+    message: discord.Message,
+    url: str,
+    settings: BotSettings,
+    store: MemoryStore,
+    base_url: str,
+) -> bool:
+    """Download `url`, stash it, and reply with its link. True if we posted."""
+    key = short_id_for(url)
+    guard = f"{message.channel.id}:{key}"
+    if guard in _inflight:
         log.info("skip %s — already in flight", url)
         return False
-    _inflight.add(key)
+    _inflight.add(guard)
 
-    cap = upload_limit(message, settings)
     tmp = Path(tempfile.mkdtemp(dir=settings.bot_temp_dir or None))
     try:
-        info, src, _ = await asyncio.to_thread(
-            download, url, tmp, None,
-            fmt=_format_selector(cap),
-            writethumbnail=False,
-        )
-        size = src.stat().st_size
-
-        if size > cap and settings.shrink_enabled:
-            shrunk = tmp / "shrunk.mp4"
-            log.info("%s is %.1fMB over cap; shrinking", url, (size - cap) / 1048576)
-            await asyncio.to_thread(
-                transcode, src, shrunk, None,
-                crf=settings.shrink_crf,
-                max_height=settings.shrink_max_height,
-            )
-            # A shrink that came out bigger is no shrink at all.
-            if shrunk.exists() and shrunk.stat().st_size < size:
-                src = shrunk
-                size = src.stat().st_size
-
-        if size > cap:
-            log.info("skip %s — %.1fMB exceeds %.1fMB cap", url, size / 1048576, cap / 1048576)
+        item = await asyncio.to_thread(_prepare, url, tmp, settings)
+        if item is None:
             return False
 
-        name = safe_filename(clean_title(info.get("title")), src.suffix)
-        await message.reply(
-            file=discord.File(src, filename=name),
-            mention_author=False,
-        )
-        log.info("posted %s as %s (%.1fMB)", url, name, size / 1048576)
+        store.put(key, item)
+        link = f"{base_url.rstrip('/')}/d/{key}"
+        await message.reply(link, mention_author=False)
+        log.info("posted %s as %s (%.1fMB, %sx%s, held %ds)",
+                 url, link, item.size / 1048576, item.width, item.height,
+                 settings.link_ttl_seconds)
         return True
 
     except Exception:
         log.exception("failed to rehost %s", url)
         return False
     finally:
-        _inflight.discard(key)
+        _inflight.discard(guard)
         shutil.rmtree(tmp, ignore_errors=True)
