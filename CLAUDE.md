@@ -71,6 +71,7 @@ gamtube/
 ├── Makefile                 # up / status / logs / bot-logs / update-ytdlp / dev / migrate / test
 ├── deploy.sh                # bootstrap script for Ubuntu 24.04 LXC + one systemd unit
 ├── scripts/update-ytdlp.sh  # timer-driven yt-dlp upgrade; restarts gamtube on a version change
+├── scripts/bot-timeline.py  # per-link summary from app.log: fully served, evicted, post-expiry 404s
 ├── .env.example
 ├── requirements.txt         # one venv for both processes; grouped shared / web / bot
 ├── README.md

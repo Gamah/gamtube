@@ -375,6 +375,7 @@ Four questions that log answers, in order of how much they matter:
 Nothing here is written anywhere but the log, and the log is `app.log`:
 
 ```bash
+python3 scripts/bot-timeline.py                      # one line per link: full, evict, 404s
 make bot-logs                                        # live, filtered to the bot
 grep 'gamtube.bot  media' /opt/gamtube/logs/app.log  # just the video fetches
 grep 'discord produced' /opt/gamtube/logs/app.log    # just the embed verdicts
