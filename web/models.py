@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from sqlalchemy import BigInteger, DateTime, Integer, JSON, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
-from app.database import Base
+from web.database import Base
 
 
 class Video(Base):

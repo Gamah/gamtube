@@ -5,9 +5,9 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
-from app.cleanup import cleanup_loop
-from app.config import get_settings
-from app.routers import admin, feedback, submit, videos
+from web.cleanup import cleanup_loop
+from web.config import get_settings
+from web.routers import admin, feedback, submit, videos
 
 
 @asynccontextmanager

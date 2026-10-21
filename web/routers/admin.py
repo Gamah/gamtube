@@ -6,11 +6,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from fastapi.responses import JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
-from app.config import get_settings, get_storage
-from app.database import get_db
-from app.models import Feedback, Video
-from app.rendering import render
-from app.storage.base import StorageBackend
+from web.config import get_settings, get_storage
+from web.database import get_db
+from web.models import Feedback, Video
+from web.rendering import render
+from web.storage.base import StorageBackend
 
 router = APIRouter()
 
@@ -189,7 +189,7 @@ async def renew(
     else:
         video.expires_at = datetime.now(timezone.utc) + timedelta(hours=hours)
 
-    from app.pipeline.worker import process_video, refresh_metadata
+    from web.worker import process_video, refresh_metadata
     if video.status in ("expired", "error") or not video.video_path:
         # Re-download the full video; process_video will set its own expires_at
         video.status = "pending"
@@ -268,7 +268,7 @@ async def reencode(
         return JSONResponse({"ok": False, "msg": "no file to re-encode"}, status_code=400)
     video.status = "reencoding"
     db.commit()
-    from app.pipeline.worker import reencode_video
+    from web.worker import reencode_video
     background_tasks.add_task(reencode_video, video.short_id, storage)
     return JSONResponse({"ok": True, "msg": "re-encoding…", "status": "reencoding"})
 

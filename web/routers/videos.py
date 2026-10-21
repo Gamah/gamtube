@@ -9,13 +9,13 @@ from fastapi.responses import JSONResponse, RedirectResponse, StreamingResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.config import get_settings, get_storage
-from app.database import get_db
-from app.models import Video
-from app.progress import get_progress
-from app.rendering import render
-from app.schemas import StatusResponse
-from app.storage.base import StorageBackend
+from web.config import get_settings, get_storage
+from web.database import get_db
+from web.models import Video
+from web.progress import get_progress
+from web.rendering import render
+from web.schemas import StatusResponse
+from web.storage.base import StorageBackend
 
 router = APIRouter()
 
@@ -137,7 +137,7 @@ async def video_rerequest(
     ).update({"status": "pending"})
     db.commit()
     if updated:
-        from app.pipeline.worker import process_video
+        from web.worker import process_video
         background_tasks.add_task(process_video, short_id, video.source_url, storage)
     return RedirectResponse(f"/v/{short_id}", status_code=303)
 

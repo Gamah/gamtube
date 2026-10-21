@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # deploy.sh — bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
+#
+# Installs two services from one checkout and one venv:
+#   gamtube      — the web app (uvicorn, web.main:app)
+#   gamtube-bot  — the Discord bot (python -m bot), only when a token is set
 # Usage: sudo bash deploy.sh [--domain example.com] [--port 8000] [--data-dir DIR] [--keep]
 #
 # Interactive by default: every setting is prompted with the value from the
@@ -46,6 +50,19 @@ EX_TRANSCODE="$(_env_get TRANSCODE_ENABLED)"
 EX_TTL="$(_env_get VIDEO_TTL_HOURS)"
 EX_TEMP_DIR="$(_env_get TEMP_DIR)"
 
+# --- bot values; only the token is prompted for, the rest carry through ---
+EX_DISCORD_TOKEN="$(_env_get DISCORD_BOT_TOKEN)"
+EX_DISCORD_GUILDS="$(_env_get DISCORD_GUILDS)"
+EX_DISCORD_CHANNELS="$(_env_get DISCORD_CHANNELS)"
+EX_EMBED_WAIT="$(_env_get EMBED_WAIT_SECONDS)"
+EX_MAX_UPLOAD_MB="$(_env_get MAX_UPLOAD_MB)"
+EX_MAX_LINKS="$(_env_get MAX_LINKS_PER_MESSAGE)"
+EX_SHRINK_ENABLED="$(_env_get SHRINK_ENABLED)"
+EX_SHRINK_CRF="$(_env_get SHRINK_CRF)"
+EX_SHRINK_HEIGHT="$(_env_get SHRINK_MAX_HEIGHT)"
+EX_WATCH_DOMAINS="$(_env_get WATCH_DOMAINS)"
+EX_BOT_TEMP_DIR="$(_env_get BOT_TEMP_DIR)"
+
 # --- listen port lives in the systemd unit, not .env ---
 if [[ "$PORT_EXPLICIT" != "true" ]]; then
   EX_PORT="$(grep -oE '\-\-port [0-9]+' /etc/systemd/system/gamtube.service 2>/dev/null | tail -n1 | grep -oE '[0-9]+' || true)"
@@ -68,6 +85,17 @@ ADMIN_PASSWORD="$EX_ADMIN_PASSWORD"
 TRANSCODE_ENABLED="${EX_TRANSCODE:-false}"
 VIDEO_TTL_HOURS="${EX_TTL:-24}"
 TEMP_DIR="${EX_TEMP_DIR:-/tmp}"
+DISCORD_BOT_TOKEN="$EX_DISCORD_TOKEN"
+DISCORD_GUILDS="$EX_DISCORD_GUILDS"
+DISCORD_CHANNELS="$EX_DISCORD_CHANNELS"
+EMBED_WAIT_SECONDS="${EX_EMBED_WAIT:-3.0}"
+MAX_UPLOAD_MB="${EX_MAX_UPLOAD_MB:-0}"
+MAX_LINKS_PER_MESSAGE="${EX_MAX_LINKS:-3}"
+SHRINK_ENABLED="${EX_SHRINK_ENABLED:-true}"
+SHRINK_CRF="${EX_SHRINK_CRF:-30}"
+SHRINK_MAX_HEIGHT="${EX_SHRINK_HEIGHT:-720}"
+WATCH_DOMAINS="$EX_WATCH_DOMAINS"
+BOT_TEMP_DIR="$EX_BOT_TEMP_DIR"
 
 # --- prompt for each value; blank keeps the shown default ---
 if [[ "$KEEP" != "true" ]]; then
@@ -105,6 +133,20 @@ if [[ "$KEEP" != "true" ]]; then
 
   read -rp "Hours until a video expires, 0 = never [$VIDEO_TTL_HOURS]: " _input
   VIDEO_TTL_HOURS="${_input:-$VIDEO_TTL_HOURS}"
+
+  if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
+    read -rsp "Discord bot token [blank = keep existing, '-' = disable bot]: " _input
+    echo
+    case "$_input" in
+      "") ;;
+      -)  DISCORD_BOT_TOKEN="" ;;
+      *)  DISCORD_BOT_TOKEN="$_input" ;;
+    esac
+  else
+    read -rsp "Discord bot token (blank = bot disabled): " _input
+    echo
+    DISCORD_BOT_TOKEN="$_input"
+  fi
 fi
 
 if [[ ! "$VIDEO_TTL_HOURS" =~ ^[0-9]+$ ]]; then
@@ -167,6 +209,17 @@ TEMP_DIR=$TEMP_DIR
 VIDEO_TTL_HOURS=$VIDEO_TTL_HOURS
 TRANSCODE_ENABLED=$TRANSCODE_ENABLED
 ADMIN_PASSWORD=$ADMIN_PASSWORD
+DISCORD_BOT_TOKEN=$DISCORD_BOT_TOKEN
+DISCORD_GUILDS=$DISCORD_GUILDS
+DISCORD_CHANNELS=$DISCORD_CHANNELS
+EMBED_WAIT_SECONDS=$EMBED_WAIT_SECONDS
+MAX_UPLOAD_MB=$MAX_UPLOAD_MB
+MAX_LINKS_PER_MESSAGE=$MAX_LINKS_PER_MESSAGE
+SHRINK_ENABLED=$SHRINK_ENABLED
+SHRINK_CRF=$SHRINK_CRF
+SHRINK_MAX_HEIGHT=$SHRINK_MAX_HEIGHT
+WATCH_DOMAINS=$WATCH_DOMAINS
+BOT_TEMP_DIR=$BOT_TEMP_DIR
 EOF
 
 echo "==> Creating media and log directories"
@@ -191,11 +244,33 @@ Type=simple
 User=$GAMTUBE_USER
 WorkingDirectory=$DEPLOY_DIR
 EnvironmentFile=$DEPLOY_DIR/.env
-ExecStart=$VENV/bin/uvicorn app.main:app --host 0.0.0.0 --port $PORT
+ExecStart=$VENV/bin/uvicorn web.main:app --host 0.0.0.0 --port $PORT
 Restart=on-failure
 RestartSec=5
 StandardOutput=append:$DEPLOY_DIR/logs/app.log
 StandardError=append:$DEPLOY_DIR/logs/app.log
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+echo "==> Installing Discord bot service"
+cat > /etc/systemd/system/gamtube-bot.service <<EOF
+[Unit]
+Description=gamtube Discord bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$GAMTUBE_USER
+WorkingDirectory=$DEPLOY_DIR
+EnvironmentFile=$DEPLOY_DIR/.env
+ExecStart=$VENV/bin/python -m bot
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:$DEPLOY_DIR/logs/bot.log
+StandardError=append:$DEPLOY_DIR/logs/bot.log
 
 [Install]
 WantedBy=multi-user.target
@@ -231,9 +306,24 @@ systemctl enable gamtube
 systemctl restart gamtube
 systemctl enable --now gamtube-update-ytdlp.timer
 
+# The bot is opt-in: no token, no service. Disabling is explicit so removing a
+# token actually stops it rather than leaving a crash-looping unit behind.
+if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
+  systemctl enable gamtube-bot
+  systemctl restart gamtube-bot
+else
+  systemctl disable --now gamtube-bot 2>/dev/null || true
+fi
+
 echo ""
 echo "==> Done."
-echo "    Service : systemctl status gamtube"
+echo "    Web     : systemctl status gamtube"
 echo "    Logs    : tail -f $DEPLOY_DIR/logs/app.log"
+if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
+  echo "    Bot     : systemctl status gamtube-bot"
+  echo "    Bot log : tail -f $DEPLOY_DIR/logs/bot.log"
+else
+  echo "    Bot     : disabled (no DISCORD_BOT_TOKEN)"
+fi
 echo "    yt-dlp  : systemctl list-timers gamtube-update-ytdlp.timer"
 echo "    Submit  : curl -X POST $BASE_URL/submit -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"

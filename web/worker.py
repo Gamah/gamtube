@@ -1,38 +1,24 @@
-import re
 import shutil
 import tempfile
 import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from app.config import get_settings
-from app.database import SessionLocal
-from app.models import Video
-from app.pipeline.downloader import download
-from app.pipeline.transcoder import _probe, transcode
-from app.progress import set_progress
-from app.storage.base import StorageBackend
-
-# Strip leading social-count noise Facebook puts before the actual title,
-# e.g. "1,234 views · 567 reactions · Real Title" → "Real Title"
-_SOCIAL_PREFIX = re.compile(
-    r'^(?:[\d,]+(?:\.\d+)?[KMB]?\s+(?:views?|reactions?|likes?|comments?|shares?)\s*[·•|,]\s*)+',
-    re.IGNORECASE,
-)
-
-
-def _clean_title(title: str | None) -> str | None:
-    if not title:
-        return title
-    cleaned = _SOCIAL_PREFIX.sub('', title).strip(' ·|,•')
-    return cleaned if cleaned else title
+from core.downloader import download
+from core.titles import clean_title
+from core.transcoder import _probe, transcode
+from web.config import get_settings
+from web.database import SessionLocal
+from web.models import Video
+from web.progress import set_progress
+from web.storage.base import StorageBackend
 
 
 def refresh_metadata(short_id: str, url: str, storage: StorageBackend) -> None:
     """Re-fetch title and thumbnail without touching the video file.
     Silently no-ops if the source is gone or unreachable."""
     import yt_dlp
-    from app.pipeline.downloader import _IMAGE_EXTS
+    from core.downloader import _IMAGE_EXTS
 
     settings = get_settings()
     tmp_dir = Path(tempfile.mkdtemp(dir=settings.temp_dir or None))
@@ -54,7 +40,7 @@ def refresh_metadata(short_id: str, url: str, storage: StorageBackend) -> None:
         ]
 
         update = {}
-        if title := _clean_title(info.get("title")):
+        if title := clean_title(info.get("title")):
             update["title"] = title
         for field in ("description", "uploader", "tags"):
             if info.get(field):
@@ -108,7 +94,7 @@ def process_video(short_id: str, url: str, storage: StorageBackend) -> None:
             storage.save(thumb_path, thumb_key)
 
         upd(
-            title=_clean_title(info.get("title")),
+            title=clean_title(info.get("title")),
             description=info.get("description"),
             uploader=info.get("uploader"),
             duration_seconds=int(info["duration"]) if info.get("duration") else None,

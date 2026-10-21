@@ -10,7 +10,16 @@ def download(
     url: str,
     output_dir: Path,
     on_progress: Callable[[float | None], None] | None = None,
+    *,
+    fmt: str = "bestvideo+bestaudio/best",
+    writethumbnail: bool = True,
 ) -> tuple[dict, Path, Path | None]:
+    """Download `url` into `output_dir`.
+
+    `fmt` is a yt-dlp format selector; the bot narrows it to stay under
+    Discord's attachment cap. `writethumbnail` is off for callers that have
+    nowhere to put a thumbnail.
+    """
     def hook(d: dict) -> None:
         if on_progress is None:
             return
@@ -27,9 +36,9 @@ def download(
             on_progress(None)
 
     ydl_opts = {
-        "format": "bestvideo+bestaudio/best",
+        "format": fmt,
         "outtmpl": str(output_dir / "video.%(ext)s"),
-        "writethumbnail": True,
+        "writethumbnail": writethumbnail,
         "quiet": True,
         "no_warnings": True,
         "progress_hooks": [hook],

@@ -1,40 +1,48 @@
 # gamtube
 
-Paste a URL from YouTube, Instagram, TikTok, Facebook, Twitter/X, or anywhere yt-dlp supports. Get back a clean, permanent link at `your.domain/v/{id}`.
+Re-host video from anywhere yt-dlp supports. Two front ends over one download
+pipeline:
+
+- **web** — paste a URL, get back a clean link at `your.domain/v/{id}`.
+  [docs/web.md](docs/web.md)
+- **bot** — a Discord bot that replies with the video when someone posts a
+  TikTok, Instagram or Facebook link Discord won't embed.
+  [docs/bot.md](docs/bot.md)
 
 No accounts. No algorithm. No ads. Just the video.
 
 ---
 
-## How it works
+## Layout
 
-1. Submit a URL — the server downloads it and stores it.
-2. You get a short link. Share it anywhere.
-3. Anyone with the link can watch it — no login, no tracking, no bullshit.
+```
+core/     yt-dlp + ffmpeg, short ids, title cleanup — no web, no Discord
+web/      FastAPI app: routes, templates, database, storage, expiry
+bot/      Discord client: link detection, download, attachment upload
+docs/     web.md, bot.md
+```
 
-Same URL always produces the same short ID, so submitting a duplicate just returns the existing link instantly.
-
-By default the file is served as downloaded (VP9/AV1 webm from YouTube, etc. — modern browsers handle these fine). Set `TRANSCODE_ENABLED=true` to normalize everything to H.264 MP4 on ingest, or re-encode individual videos on demand from the admin panel.
-
----
-
-## Scroll feed
-
-Your instance has a `/scroll` feed — a full-screen, TikTok-style vertical scroll of every video you've marked as permanent (no expiry). Send the link to friends as your personal, curated video feed: no ads, no algorithm, no accounts, no data collection. Just the videos you chose to keep.
-
-Mark any video permanent from the admin panel, or hit the **+** button directly on the video page while logged in.
+`core/` is the only shared code. The web app and the bot are separate
+processes, separate systemd units, and neither imports the other — the bot runs
+perfectly well with the web app stopped, and vice versa. They share one venv
+and one `.env`, each reading only its own keys.
 
 ---
 
-## Admin panel
+## Run either one
 
-Set `ADMIN_PASSWORD` in `.env` to enable `/manage` — a paginated table of all videos with per-row actions: renew expiry, delete file, unlist, re-encode to H.264, or nuke the DB row entirely. Leave it empty to disable the panel.
+```bash
+cp .env.example .env
+make migrate
+make dev        # web, on :8000
+make dev-bot    # bot (needs DISCORD_BOT_TOKEN)
+```
 
 ---
 
-## Self-hosting
+## Deploy
 
-Requires a fresh **Ubuntu 24.04** LXC container (or VM). Run as root:
+Fresh **Ubuntu 24.04** LXC container or VM, as root:
 
 ```bash
 git clone https://github.com/Gamah/gamtube.git
@@ -42,20 +50,29 @@ cd gamtube
 bash deploy.sh --domain your.domain.tld
 ```
 
-That's it. The script installs Python 3.12, ffmpeg, sets up a systemd service, and runs migrations.
+Installs Python 3.12 and ffmpeg, creates a service user and a venv, writes
+`.env`, runs migrations, and registers `gamtube` plus — if you give it a token —
+`gamtube-bot`. Every prompt is pre-filled from the existing `.env`, so pressing
+enter on a re-run keeps the current value and nothing is silently reset.
 
-**Logs:** `tail -f /opt/gamtube/logs/app.log`
+The base URL prompt wants a full URL **including scheme**: `MEDIA_BASE_URL` is
+derived from it, and an `http://` value on an HTTPS site gets every video
+blocked as mixed content. `--domain` only ever produces `http://`.
 
-**Re-deploy after updates:**
-```bash
-git pull && bash deploy.sh --domain your.domain.tld
-```
+Updating an existing guest is `make up` (pull, re-deploy with `--keep`, print
+versions). `make status`, `make logs`, `make bot-logs` and `make update-ytdlp`
+cover the rest.
+
+A daily timer upgrades yt-dlp and restarts both services only when the version
+actually moves — they import it as a library, so nothing picks up a new
+extractor set without a restart.
 
 ---
 
 ## Stack
 
-Python 3.12 · FastAPI · yt-dlp · ffmpeg · SQLite · SQLAlchemy · Alembic
+Python 3.12 · FastAPI · discord.py · yt-dlp · ffmpeg · SQLite · SQLAlchemy ·
+Alembic
 
 ---
 

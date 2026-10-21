@@ -21,7 +21,9 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
 
-    model_config = {"env_file": ".env"}
+    # "extra": "ignore" matters — the web app and the bot share one .env,
+    # and pydantic-settings otherwise rejects a file holding the other's keys.
+    model_config = {"env_file": ".env", "extra": "ignore"}
 
 
 @lru_cache(maxsize=1)
@@ -32,7 +34,7 @@ def get_settings() -> Settings:
 def get_storage():
     s = get_settings()
     if s.storage_backend == "local":
-        from app.storage.local import LocalStorageBackend
+        from web.storage.local import LocalStorageBackend
         return LocalStorageBackend(s.media_root, s.media_base_url)
-    from app.storage.s3 import S3StorageBackend
+    from web.storage.s3 import S3StorageBackend
     return S3StorageBackend()

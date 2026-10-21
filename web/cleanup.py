@@ -18,9 +18,9 @@ async def cleanup_loop() -> None:
 
 
 def _expire_videos() -> None:
-    from app.config import get_settings, get_storage
-    from app.database import SessionLocal
-    from app.models import Video
+    from web.config import get_settings, get_storage
+    from web.database import SessionLocal
+    from web.models import Video
 
     settings = get_settings()
     if settings.video_ttl_hours == 0:

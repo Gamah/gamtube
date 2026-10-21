@@ -1,6 +1,6 @@
 import shutil
 from pathlib import Path
-from app.storage.base import StorageBackend
+from web.storage.base import StorageBackend
 
 
 class LocalStorageBackend(StorageBackend):

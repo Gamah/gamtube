@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Upgrade yt-dlp inside the gamtube venv and restart the service only if the
+# Upgrade yt-dlp inside the gamtube venv and restart the services only if the
 # version actually moved. Installed and driven by gamtube-update-ytdlp.timer.
 set -euo pipefail
 
@@ -18,5 +18,10 @@ if [ "$before" = "$after" ]; then
   exit 0
 fi
 
-echo "yt-dlp $before -> $after; restarting gamtube"
+# Both processes import yt-dlp as a library, so neither picks up a new version
+# without a restart. Skip the bot when it isn't enabled.
+echo "yt-dlp $before -> $after; restarting services"
 systemctl restart gamtube
+if systemctl is-enabled --quiet gamtube-bot 2>/dev/null; then
+  systemctl restart gamtube-bot
+fi

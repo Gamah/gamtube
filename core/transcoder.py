@@ -36,16 +36,37 @@ def transcode(
     input_path: Path,
     output_path: Path,
     on_progress: Callable[[float | None], None] | None = None,
+    *,
+    crf: int = 23,
+    max_height: int | None = None,
 ) -> Path:
+    """Normalise to H.264/AAC mp4, stream-copying when the input already is.
+
+    `crf` and `max_height` are the bot's shrink knobs: a higher crf and a
+    downscale are what bring an over-cap clip under Discord's limit. Setting
+    either away from the default rules out the stream-copy path.
+    """
     probe = _probe(input_path)
     streams = probe.get("streams", [])
     video = next((s for s in streams if s.get("codec_type") == "video"), None)
 
-    if video and video.get("codec_name") == "h264" and input_path.suffix.lower() == ".mp4":
+    scale_args: list[str] = []
+    if max_height and video and (video.get("height") or 0) > max_height:
+        # -2 keeps the width even, which libx264 requires
+        scale_args = ["-vf", f"scale=-2:{max_height}"]
+
+    if (
+        not scale_args
+        and crf == 23
+        and video
+        and video.get("codec_name") == "h264"
+        and input_path.suffix.lower() == ".mp4"
+    ):
         codec_args = ["-c", "copy"]
     else:
         codec_args = [
-            "-c:v", "libx264", "-crf", "23", "-preset", "superfast",
+            *scale_args,
+            "-c:v", "libx264", "-crf", str(crf), "-preset", "superfast",
             "-c:a", "aac", "-b:a", "128k",
         ]
 

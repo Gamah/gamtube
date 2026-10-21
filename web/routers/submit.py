@@ -4,13 +4,13 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.config import get_settings, get_storage
-from app.database import get_db
-from app.ids import short_id_for
-from app.models import Video
-from app.rendering import render
-from app.schemas import SubmitRequest
-from app.storage.base import StorageBackend
+from web.config import get_settings, get_storage
+from web.database import get_db
+from core.ids import short_id_for
+from web.models import Video
+from web.rendering import render
+from web.schemas import SubmitRequest
+from web.storage.base import StorageBackend
 
 router = APIRouter()
 
@@ -41,7 +41,7 @@ async def submit(
     db: Session = Depends(get_db),
     storage: StorageBackend = Depends(get_storage),
 ):
-    from app.pipeline.worker import process_video
+    from web.worker import process_video
 
     sid = short_id_for(body.url)
     settings = get_settings()

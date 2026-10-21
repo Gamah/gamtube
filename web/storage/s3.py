@@ -1,5 +1,5 @@
 from pathlib import Path
-from app.storage.base import StorageBackend
+from web.storage.base import StorageBackend
 
 
 class S3StorageBackend(StorageBackend):

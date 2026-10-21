@@ -2,9 +2,9 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.database import get_db
-from app.models import Feedback
-from app.rendering import render
+from web.database import get_db
+from web.models import Feedback
+from web.rendering import render
 
 router = APIRouter()
 

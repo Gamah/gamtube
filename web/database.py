@@ -9,7 +9,7 @@ class Base(DeclarativeBase):
 
 @lru_cache(maxsize=1)
 def _engine():
-    from app.config import get_settings
+    from web.config import get_settings
     s = get_settings()
     kw = {"connect_args": {"check_same_thread": False}} if "sqlite" in s.database_url else {}
     return create_engine(s.database_url, **kw)
