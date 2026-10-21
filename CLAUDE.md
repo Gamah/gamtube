@@ -290,12 +290,27 @@ rather than going quiet.
 
 `ACK_MODE=reaction` acknowledges with an emoji on the original message instead,
 which leaves nothing behind, but it needs Add Reactions on the channel and
-falls back to a message without it. Neither mode changes how fast the player
-appears: **a bot cannot set an embed's `video` field** (Discord's Create
-Message docs exclude `provider`, `video` and image dimensions), so the only
-ways to an inline video are a URL Discord unfurls or an attachment upload. The
-lag between our message and the player is Discord's, and clients sometimes
-don't re-render until you revisit the channel.
+falls back to a message without it.
+
+**Posting the link is what makes Discord fetch it**, so the player can only
+ever arrive after the message: there is no way to pre-attach it, because **a
+bot cannot set an embed's `video` field** (Discord's Create Message docs
+exclude `provider`, `video` and image dimensions). Clients also sometimes don't
+re-render until you revisit the channel, which looks like the bot being slow.
+
+`WARMUP_CHANNEL_ID` works around it by posting the link in a throwaway channel
+first, waiting until Discord has pulled the whole file, pausing
+`WARMUP_SETTLE_SECONDS`, deleting it, and only then posting publicly against
+Discord's now-warm per-URL cache. **The wait is on our own byte accounting, not
+a timer** - `Item.record_served` / `store.is_complete`, fed by the media route
+- because we serve the file and therefore know first-hand when Discord
+finished. Every failure path (no channel, failed post, timeout) falls back to
+posting unwarmed.
+
+Two things this assumes and nobody has verified: that Discord's unfurl cache is
+shared across channels, and that a settle pause is enough. The log shows
+whether it worked - a warmed link should produce no second `page` fetch when it
+goes out publicly.
 
 `ACK_TEXT`/`ACK_FAILED_TEXT` defaults deliberately contain no `'`, `"` or `#`:
 `.env` is read by systemd as an `EnvironmentFile`, which treats those as
@@ -384,6 +399,10 @@ LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet 
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
+WARMUP_CHANNEL_ID=0             # warm Discord's unfurl cache before posting; 0 = off
+WARMUP_TIMEOUT_SECONDS=20.0
+WARMUP_SETTLE_SECONDS=3.0
+LINK_NOTE=(clicking this link...)  # appended under the link; empty for none
 ACK_MODE=message                # message | reaction | none while downloading
 BOT_DEBUG=false                 # header dumps, stage timings, embed-arrival polling
 HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags

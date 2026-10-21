@@ -366,6 +366,43 @@ eq("custom requirement set",
 eq("channel without permissions_for", missing_capabilities(me, object()), [])
 eq("no member object", missing_capabilities(None, PermChan(Perms())), [])
 
+
+# ---- byte accounting: the bot waits on this before posting the link, so
+# "has discord finished pulling it" has to be right ----
+it = item(1000)
+eq("starts incomplete", it.complete, False)
+it.record_served(400)
+eq("partial stays incomplete", (it.served_bytes, it.complete), (400, False))
+it.record_served(600)
+eq("reaching size completes", (it.served_bytes, it.complete), (1000, True))
+
+it = item(1000)
+it.record_served(1000, whole=True)
+eq("full-body response completes", it.complete, True)
+
+it = item(1000)
+it.record_served(50, whole=True)
+eq("whole flag completes regardless of count", it.complete, True)
+
+it = item(1000)
+it.record_served(-5)
+eq("negative counts ignored", it.served_bytes, 0)
+
+it = item(1000)
+for _ in range(3):
+    it.record_served(500)
+eq("overlapping ranges still complete", it.complete, True)
+
+store = MemoryStore(ttl_seconds=100, max_bytes=10_000, now=clock)
+store.put("k", item(300))
+eq("store reports incomplete", store.is_complete("k"), False)
+store.record_fetch("k", 100)
+eq("still incomplete", store.is_complete("k"), False)
+store.record_fetch("k", 200)
+eq("store reports complete", store.is_complete("k"), True)
+store.record_fetch("gone", 100)
+eq("recording an unknown key is harmless", store.is_complete("gone"), False)
+
 if fails:
     print(f"FAIL ({len(fails)})")
     for f in fails:

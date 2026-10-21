@@ -32,9 +32,26 @@ class Item:
     created: float = 0.0
     fetches: int = field(default=0)
 
+    # Bytes handed out so far, and whether that covers the whole file. The bot
+    # waits on `complete` before posting the link publicly: we serve the video,
+    # so we know first-hand when Discord has finished pulling it, which is a
+    # better signal than guessing a delay.
+    served_bytes: int = 0
+    complete: bool = False
+
     @property
     def size(self) -> int:
         return len(self.data)
+
+    def record_served(self, count: int, whole: bool = False) -> None:
+        """Note bytes sent. `whole` means a full-body response, not a range.
+
+        Ranges can overlap, so the byte count is a lower bound on progress
+        rather than an exact tally; `>= size` is the practical completion test.
+        """
+        self.served_bytes += max(0, count)
+        if whole or self.served_bytes >= self.size:
+            self.complete = True
 
 
 class MemoryStore:
@@ -74,6 +91,18 @@ class MemoryStore:
             if item is not None:
                 item.fetches += 1
             return item
+
+    def record_fetch(self, key: str, count: int, whole: bool = False) -> None:
+        """Record bytes served for `key`, under the store lock."""
+        with self._lock:
+            item = self._items.get(key)
+            if item is not None:
+                item.record_served(count, whole)
+
+    def is_complete(self, key: str) -> bool:
+        with self._lock:
+            item = self._items.get(key)
+            return bool(item and item.complete)
 
     def prune(self) -> int:
         with self._lock:

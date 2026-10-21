@@ -215,6 +215,66 @@ class _Ack:
             log.warning("could not remove the acknowledgement reaction")
 
 
+async def _warm(
+    message: discord.Message,
+    key: str,
+    link: str,
+    settings: BotSettings,
+    store: MemoryStore,
+) -> None:
+    """Get Discord to fetch the video before the link is posted publicly.
+
+    Posting a link is what makes Discord fetch it, so the player can only ever
+    arrive after the message. Posting it somewhere throwaway first means that
+    by the time it goes out for real, Discord has already built the embed and
+    should serve it from its per-URL cache.
+
+    The wait is on our own byte accounting rather than a timer: we serve the
+    file, so `store.is_complete` is first-hand knowledge that Discord finished
+    pulling it. The settle pause afterwards is for Discord's own processing,
+    which we cannot see.
+
+    Best effort throughout. A missing channel, a failed post or a timeout all
+    just mean the link goes out unwarmed, which is the old behaviour.
+    """
+    channel = None
+    if message.guild is not None:
+        channel = message.guild.get_channel(settings.warmup_channel_id)
+    if channel is None:
+        log.warning("warmup channel %s not found in this guild; posting unwarmed",
+                    settings.warmup_channel_id)
+        return
+
+    started = time.monotonic()
+    try:
+        note = await channel.send(link)
+    except discord.HTTPException:
+        log.warning("could not post to the warmup channel; posting unwarmed")
+        return
+
+    try:
+        deadline = started + settings.warmup_timeout_seconds
+        while time.monotonic() < deadline:
+            if store.is_complete(key):
+                waited = time.monotonic() - started
+                log.info("warm %s: discord pulled the whole file in %.1fs, "
+                         "settling %.1fs", key, waited, settings.warmup_settle_seconds)
+                await asyncio.sleep(settings.warmup_settle_seconds)
+                return
+            await asyncio.sleep(0.25)
+        log.info("warm %s: timed out after %.1fs with %d of %d bytes served; "
+                 "posting anyway",
+                 key, settings.warmup_timeout_seconds,
+                 getattr(store.get(key), "served_bytes", 0),
+                 getattr(store.get(key), "size", 0))
+    finally:
+        try:
+            await note.delete()
+        except discord.HTTPException:
+            log.warning("could not delete the warmup message in #%s",
+                        getattr(channel, "name", "?"))
+
+
 async def rehost(
     message: discord.Message,
     url: str,
@@ -247,7 +307,17 @@ async def rehost(
 
         store.put(key, item)
         link = f"{base_url.rstrip('/')}/d/{key}"
-        await message.reply(link, mention_author=False)
+
+        if settings.warmup_channel_id:
+            await _warm(message, key, link, settings, store)
+
+        # The URL goes first and stays bare on its own line: Discord unfurls a
+        # plain URL in a message that has other text, but not one wrapped in
+        # <> or markdown, and the embed is the entire point.
+        body = link
+        if settings.link_note:
+            body = f"{link}\n{settings.link_note}"
+        await message.reply(body, mention_author=False)
         await ack.done()
         log.info("posted %s as %s (%.1fMB, %sx%s, held %ds, %.1fs end to end; "
                  "store now %d item(s)/%.1fMB)",

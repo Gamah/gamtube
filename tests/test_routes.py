@@ -171,6 +171,32 @@ try:
 
     eq("missing key media 404s", crawl("/d/nope/f").status_code, 404)
 
+    # ---- byte accounting drives the warmup wait, so the route must record it
+    fresh = MemoryStore(ttl_seconds=100, max_bytes=10_000)
+    fresh.put("warm1", Item(data=BODY, content_type="video/mp4"))
+    warm_app = FastAPI()
+    warm_app.state.bot_store = fresh
+    warm_app.include_router(ephemeral.router)
+    wc = TestClient(warm_app)
+
+    eq("not complete before any fetch", fresh.is_complete("warm1"), False)
+    wc.get("/d/warm1/f", headers={"User-Agent": CRAWLER_UA,
+                                  "Range": f"bytes=0-{len(BODY)//2 - 1}"})
+    eq("half a file is not complete", fresh.is_complete("warm1"), False)
+    wc.get("/d/warm1/f", headers={"User-Agent": CRAWLER_UA,
+                                  "Range": f"bytes={len(BODY)//2}-"})
+    eq("the rest completes it", fresh.is_complete("warm1"), True)
+
+    fresh.put("warm2", Item(data=BODY, content_type="video/mp4"))
+    wc.get("/d/warm2/f", headers={"User-Agent": CRAWLER_UA})
+    eq("an unranged fetch completes it", fresh.is_complete("warm2"), True)
+
+    fresh.put("warm3", Item(data=BODY, content_type="video/mp4"))
+    wc.head("/d/warm3/f", headers={"User-Agent": CRAWLER_UA})
+    eq("HEAD serves no bytes, so no completion", fresh.is_complete("warm3"), False)
+    wc.get("/d/warm3", headers={"User-Agent": CRAWLER_UA})
+    eq("the page alone does not complete it", fresh.is_complete("warm3"), False)
+
     # ---- the optional byte gate ----
     # Deliberately a separate list from the crawler one: Discord's media proxy
     # is not its unfurler, so this is filled from the log, not assumed.

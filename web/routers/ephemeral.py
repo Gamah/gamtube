@@ -42,9 +42,24 @@ def get_settings_bot():
     return get_bot_settings()
 
 
+def _store(request: Request) -> MemoryStore | None:
+    return getattr(request.app.state, "bot_store", None)
+
+
 def _lookup(request: Request, key: str) -> Item | None:
-    store: MemoryStore | None = getattr(request.app.state, "bot_store", None)
+    store = _store(request)
     return store.get(key) if store is not None else None
+
+
+def _record(request: Request, key: str, count: int, whole: bool = False) -> None:
+    """Tell the store how much of the file has gone out.
+
+    The bot waits on this before posting the link publicly, so it is the one
+    piece of request handling the rest of the feature depends on.
+    """
+    store = _store(request)
+    if store is not None:
+        store.record_fetch(key, count, whole)
 
 
 def _is_crawler(request: Request) -> bool:
@@ -153,11 +168,16 @@ def discord_media(
 
     if rng is None:
         log.info("media %s serving all %.1fMB", key, size / 1048576)
+        _record(request, key, size, whole=True)
         return Response(content=item.data, media_type=item.content_type, headers=common)
 
     start, end = rng
+    served = end - start + 1
     log.info("media %s serving bytes %d-%d of %d (%.1fMB)",
-             key, start, end, size, (end - start + 1) / 1048576)
+             key, start, end, size, served / 1048576)
+    _record(request, key, served)
+    if item.complete:
+        log.info("media %s fully served after %d request(s)", key, item.fetches)
     return Response(
         content=item.data[start : end + 1],
         status_code=206,

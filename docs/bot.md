@@ -21,9 +21,18 @@ yt-dlp downloads into.
    for that long is indistinguishable from the bot ignoring you.
 3. It downloads the video, normalises it to H.264 mp4 if it isn't already, and
    puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
-4. It replies with `https://your.domain/d/{id}` - a bare URL, because wrapping
-   it in `<>` or markdown suppresses the embed, which is the one thing needed -
-   then deletes the note.
+4. It replies with the link plus a short note:
+
+   ```
+   https://your.domain/d/abc123def456
+   (clicking this link does nothing)
+   ```
+
+   The URL stays bare on its own line: Discord unfurls a plain URL in a
+   message that has other text, but not one wrapped in `<>` or markdown, and
+   the embed is the entire point. The note is there because the link plays
+   inline but goes nowhere useful when clicked - set `LINK_NOTE=` to drop it.
+   The "working on it" note is deleted at this point.
 
    The link is a **new message** rather than an edit of the note, because a
    fresh message is reliably unfurled. On failure the note is edited to say so

@@ -55,10 +55,24 @@ class BotSettings(BaseSettings):
     #              Falls back to message if the permission isn't there.
     #   none     - stay silent until the link is ready
     ack_mode: Literal["message", "reaction", "none"] = "message"
+    # Appended under the link. Viewers see a URL that plays inline but goes
+    # nowhere useful if clicked, so say so. Empty for no note.
+    link_note: str = "(clicking this link does nothing)"
+
     ack_text: str = "working on it\u2026"
     ack_failed_text: str = "could not fetch that one."
     ack_emoji: str = "\u23f3"          # hourglass
     ack_failed_emoji: str = "\u26a0\ufe0f"  # warning sign
+
+    # Posting the link is what makes Discord fetch it, so the player always
+    # lands after the message. Warming works around that: post the link in a
+    # throwaway channel first, wait until we have served the whole file (plus a
+    # settling pause), delete it, then post publicly against Discord's now-warm
+    # per-URL unfurl cache. 0 disables it and the link goes straight out.
+    # Must be a channel in the same guild that the bot can post in.
+    warmup_channel_id: int = 0
+    warmup_timeout_seconds: float = 20.0
+    warmup_settle_seconds: float = 3.0
 
     # Cap on uploads from one message, so a link dump can't become a flood.
     max_links_per_message: int = 3
