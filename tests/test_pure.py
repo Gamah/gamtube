@@ -14,7 +14,7 @@ from bot.agents import DEFAULT_CRAWLERS, is_crawler
 from bot.ranges import parse_range
 from bot.scope import allowed_by_ids, missing_capabilities, opted_in
 from bot.store import Item, MemoryStore
-from core.titles import clean_title, safe_filename
+from core.titles import clean_title
 
 fails = []
 
@@ -109,24 +109,6 @@ eq("no noise untouched", clean_title("Just A Title"), "Just A Title")
 eq("noise only falls back", clean_title("1.2K views · "), "1.2K views · ")
 eq("none passthrough", clean_title(None), None)
 eq("empty passthrough", clean_title(""), "")
-
-# ---- safe_filename ----
-eq("slashes removed", safe_filename("a/b\\c", ".mp4"), "a b c.mp4")
-eq("extension kept", safe_filename("clip", ".webm"), "clip.webm")
-eq("emoji-only falls back", safe_filename("🎉🎉", ".mp4"), "🎉🎉.mp4")
-eq("empty falls back", safe_filename("", ".mp4"), "video.mp4")
-eq("none falls back", safe_filename(None, ".mp4"), "video.mp4")
-eq("separators-only falls back", safe_filename("///", ".mp4"), "video.mp4")
-eq("control chars stripped", safe_filename("a\x00\x1fb", ".mp4"), "a b.mp4")
-eq("whitespace collapsed", safe_filename("a    b\n\tc", ".mp4"), "a b c.mp4")
-eq("trailing dot stripped", safe_filename("title...", ".mp4"), "title.mp4")
-eq("facebook noise cleaned too",
-   safe_filename("1.2K views · 34 reactions · Real Title", ".mp4"), "Real Title.mp4")
-eq("length capped", len(safe_filename("x" * 300, ".mp4")), 84)
-eq("cap does not leave trailing space",
-   safe_filename("y" * 79 + " zzz", ".mp4"), "y" * 79 + ".mp4")
-eq("quotes and pipes", safe_filename('a"b|c<d>e:f*g?h', ".mp4"), "a b c d e f g h.mp4")
-
 
 # ---- scope: the coarse allowlists ----
 eq("no allowlists allows all", allowed_by_ids(1, 2, set(), set()), True)

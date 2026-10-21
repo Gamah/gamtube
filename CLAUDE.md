@@ -24,7 +24,7 @@ Submissions are public; anyone who can reach the server can submit a URL. Viewin
 gamtube/
 ├── core/                    # SHARED. no web, no Discord, no DB - stdlib + yt-dlp + ffmpeg
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
-│   ├── titles.py            # clean_title() social-count stripping + safe_filename()
+│   ├── titles.py            # clean_title(): strips social-count noise from og:title
 │   ├── downloader.py        # yt-dlp wrapper → info dict + video path + thumbnail path
 │   └── transcoder.py        # ffmpeg H.264 normalization, stream-copy if already H.264
 ├── web/
