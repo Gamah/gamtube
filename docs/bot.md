@@ -16,18 +16,27 @@ yt-dlp downloads into.
 ## The lifecycle
 
 1. Someone posts a TikTok link. Discord renders a useless card.
-2. The bot downloads the video, normalises it to H.264 mp4 if it isn't
-   already, and puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
-3. It replies with `https://your.domain/d/{id}` — a bare URL, because wrapping
-   it in `<>` or markdown suppresses the embed, which is the one thing needed.
-4. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
+2. The bot replies **"working on it..."** straight away and shows the typing
+   indicator. Download plus a re-encode can run most of a minute, and silence
+   for that long is indistinguishable from the bot ignoring you.
+3. It downloads the video, normalises it to H.264 mp4 if it isn't already, and
+   puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
+4. It replies with `https://your.domain/d/{id}` — a bare URL, because wrapping
+   it in `<>` or markdown suppresses the embed, which is the one thing needed —
+   then deletes the note.
+
+   The link is a **new message** rather than an edit of the note, because a
+   fresh message is reliably unfurled. On failure the note is edited to say so
+   instead of vanishing. `ACK_ENABLED=false` goes back to replying only when
+   done.
+5. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
    with byte-range requests to build the player.
-5. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
+6. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
    404s.
 
 ### The assumption this rests on
 
-Step 5 is a bet: that once Discord has unfurled a link it holds its own copy,
+Step 6 is a bet: that once Discord has unfurled a link it holds its own copy,
 so the link may expire. **If Discord instead proxies each view from the origin,
 an expired item means a dead embed in channel history.**
 

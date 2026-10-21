@@ -280,6 +280,19 @@ TTL and trying to play the embed from another account, and raise the TTL if it
 fails. Attachment upload would sidestep the question entirely but is capped by
 the guild's `filesize_limit`, which is why it isn't the default.
 
+**The reply is two messages, not one edit.** Download plus any re-encode can
+run the better part of a minute, so `ACK_ENABLED` posts a short note
+immediately and the work happens inside `channel.typing()`. When the link is
+ready it goes out as a **new** message and the note is deleted — editing the
+note to contain the link would be tidier but relies on Discord unfurling an
+edited message, which is not something to bet the whole feature on. A failure
+edits the note instead of deleting it, since that text carries no link and
+silence after "working on it" is worse than a one-line no.
+
+`ACK_TEXT`/`ACK_FAILED_TEXT` defaults deliberately contain no `'`, `"` or `#`:
+`.env` is read by systemd as an `EnvironmentFile`, which treats those as
+quoting and comments.
+
 **The trigger is the subtle part.** `on_message` fires before Discord has
 unfurled anything, so the message delivered to the handler never has embeds
 yet. The bot sleeps `EMBED_WAIT_SECONDS`, re-fetches the message, and only then
@@ -363,6 +376,7 @@ LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet 
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
+ACK_ENABLED=true                # post "working on it" first, swap in the link after
 BOT_DEBUG=false                 # header dumps, stage timings, embed-arrival polling
 HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags
 CRAWLER_USER_AGENTS=            # page gate; empty = bot/agents.py DEFAULT_CRAWLERS

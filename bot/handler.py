@@ -137,6 +137,33 @@ def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
     )
 
 
+async def _drop(ack: "discord.Message | None") -> None:
+    """Remove the acknowledgement once the link has landed."""
+    if ack is None:
+        return
+    try:
+        await ack.delete()
+    except discord.HTTPException:
+        # Deleting its own message needs no permission, so this is just a
+        # network hiccup; the note is cosmetic either way.
+        log.warning("could not delete the acknowledgement")
+
+
+async def _fail(ack: "discord.Message | None", settings: BotSettings) -> None:
+    """Turn the acknowledgement into a short explanation.
+
+    Edited rather than replaced because it carries no link, so there is nothing
+    for Discord to unfurl and nothing lost by editing. Silence after saying
+    "working on it" would be worse than a one-line no.
+    """
+    if ack is None:
+        return
+    try:
+        await ack.edit(content=settings.ack_failed_text)
+    except discord.HTTPException:
+        log.warning("could not update the acknowledgement after a failure")
+
+
 async def rehost(
     message: discord.Message,
     url: str,
@@ -154,14 +181,28 @@ async def rehost(
 
     started = time.monotonic()
     tmp = Path(tempfile.mkdtemp(dir=settings.bot_temp_dir or None))
+    ack = None
     try:
-        item = await asyncio.to_thread(_prepare, url, tmp, settings)
+        if settings.ack_enabled:
+            try:
+                ack = await message.reply(settings.ack_text, mention_author=False)
+            except discord.HTTPException:
+                # Not worth abandoning the job over; the link is the payload.
+                log.warning("could not post the acknowledgement for %s", url)
+
+        # Keeps the typing indicator alive for the whole download, which is
+        # free and needs no permission beyond posting.
+        async with message.channel.typing():
+            item = await asyncio.to_thread(_prepare, url, tmp, settings)
+
         if item is None:
+            await _fail(ack, settings)
             return False
 
         store.put(key, item)
         link = f"{base_url.rstrip('/')}/d/{key}"
         await message.reply(link, mention_author=False)
+        await _drop(ack)
         log.info("posted %s as %s (%.1fMB, %sx%s, held %ds, %.1fs end to end; "
                  "store now %d item(s)/%.1fMB)",
                  url, link, item.size / 1048576, item.width, item.height,
@@ -171,6 +212,7 @@ async def rehost(
 
     except Exception:
         log.exception("failed to rehost %s", url)
+        await _fail(ack, settings)
         return False
     finally:
         _inflight.discard(guard)

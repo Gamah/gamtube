@@ -44,6 +44,14 @@ class BotSettings(BaseSettings):
     # Domains to watch; empty = bot.detect.DEFAULT_DOMAINS.
     watch_domains: str = ""
 
+    # Download plus any re-encode can take the better part of a minute, which
+    # looks like nothing happening. Acknowledge straight away, then replace the
+    # note with the link. Posting the link as a NEW message rather than editing
+    # the note is deliberate: a fresh message is reliably unfurled.
+    ack_enabled: bool = True
+    ack_text: str = "working on it\u2026"
+    ack_failed_text: str = "could not fetch that one."
+
     # Cap on uploads from one message, so a link dump can't become a flood.
     max_links_per_message: int = 3
 
