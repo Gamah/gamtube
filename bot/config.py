@@ -11,10 +11,17 @@ from bot.upload import Outcome
 class BotSettings(BaseSettings):
     discord_bot_token: str = ""
 
-    # Opt-in is a Discord permission overwrite, not bot state: a channel counts
-    # as enabled when it explicitly grants the bot opt_in_permission. Set
-    # channel_opt_in=false to act everywhere the allowlists below permit.
-    channel_opt_in: bool = True
+    # Off by default: the bot replies wherever it can see a link, and a server
+    # admin who does not want it in a channel denies it View Channels there.
+    # That is one overwrite to opt out rather than six to opt in, and it is
+    # how people expect a bot to behave.
+    #
+    # True instead requires an explicit per-channel overwrite granting
+    # opt_in_permission before the bot will act, which is stricter but means
+    # a new channel is silent until someone remembers to tick it. The
+    # machinery is kept because that is a real preference, not because it is
+    # the default; see bot/scope.py.
+    channel_opt_in: bool = False
     opt_in_permission: str = "embed_links"
 
     # Coarse allowlists applied before the opt-in check; empty = no limit.

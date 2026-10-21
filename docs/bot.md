@@ -243,11 +243,11 @@ Without it every message arrives with empty content and the bot sees no links
 at all - it will connect, log in, and do nothing. The intent is free to toggle
 for a personal bot; past roughly 100 servers Discord requires review.
 
-### 3. Invite it with no permissions at all
+### 3. Invite it
 
 On the application's **Installation** page set the install link to **Discord
 Provided Link**, and under **Default Install Settings → Guild Install** set
-scope `bot` and **no permissions**. Then the invite is just:
+scope `bot` and the permissions below. Then the invite is just:
 
 ```
 https://discord.com/oauth2/authorize?client_id={APP_ID}
@@ -256,23 +256,24 @@ https://discord.com/oauth2/authorize?client_id={APP_ID}
 Discord reads the scopes from what you saved, so there is one place to change
 this later rather than a URL to rebuild.
 
-**What this does and does not do.** It grants the bot no permissions of its
-own - but a bot is a server member, so it still inherits `@everyone`, which on
-most servers allows View Channels, Send Messages, Read Message History and
-Embed Links. Install permissions of `0` means "nothing extra", not "nothing".
+| Permission | Why |
+|---|---|
+| View Channels | see a channel exists at all |
+| Send Messages | post the reply |
+| Read Message History | re-read the message after Discord unfurls it |
+| Embed Links | what makes a posted link unfurl into a player |
+| Attach Files | send the video as an attachment instead of a link |
+| Add Reactions | the working and outcome markers |
 
-So the bot can usually still *see* your channels. What stops it *acting* is
-that `opted_in` ignores both role-level permissions and `@everyone` overwrites:
-only an explicit overwrite naming the bot or its own role counts, and that is
-never there by default.
+Install permissions are a ceiling, not a guarantee: a channel overwrite denying
+any of them still wins, which is exactly how you exclude a channel. Leaving
+them out of the invite also mostly works, since a bot inherits `@everyone` and
+most servers allow all but Attach Files to it - but then the bot's permissions
+change whenever `@everyone` does, which is a surprise you do not need.
 
-If you want it genuinely unable to *see* the rest of the server, that takes
-overwrites: see **Making it blind** below. None of it changes the code, and
-the bot never writes those overwrites itself.
-
-Granting View Channels / Send Messages / Read Message History in the install
-settings instead is the other direction: it makes the bot able to work anywhere
-and leaves Embed Links as the only per-channel tick.
+**The bot acts wherever it can see a link.** There is no per-channel enabling
+step: see **Excluding a channel** below for the opt-out, and **Requiring an
+explicit opt-in** for the stricter mode if you want the other behaviour.
 
 ### 4. Check the public URL
 
@@ -283,156 +284,111 @@ fronts gamtube needs no new routing.
 
 ---
 
-## Opting a channel in
+## Excluding a channel
 
-Since the bot holds no server-wide permissions, a channel is enabled by giving
-it everything it needs right there:
+Deny the bot **View Channels** there:
 
 > Channel → **Edit Channel** → **Permissions** → add the bot (or its role) →
-> tick all six → save.
+> set View Channels to deny (red X) → save.
 
-| Permission | Why |
-|---|---|
-| View Channels | see the channel exists at all |
-| Send Messages | post the reply |
-| Read Message History | re-read the message after Discord unfurls it |
-| Add Reactions | the acknowledgement and the outcome marker are reactions |
-| Attach Files | send the video as an attachment; without it every clip falls back to a link and carries 🔒 |
-| **Embed Links** | the opt-in marker, and what makes the reply unfurl |
+A category-level deny covers every channel under it, which is the cheap way to
+exclude most of a server at once; a channel-level allow beats it where you want
+the bot back. Threads have no permissions of their own, so a thread follows its
+parent channel.
 
-Removing them opts the channel back out. There is no command and no stored
-state: Discord is the record, so it survives restarts and redeploys, and there
-is nothing to keep in sync.
+That is the whole mechanism. Discord is the record, so it survives restarts and
+redeploys, there is no command and no stored state, and the bot never writes
+these overwrites itself - doing so would need Manage Roles or Manage Channels,
+which it deliberately does not have.
 
-`Embed Links` is the one the bot actually tests for. Tick it without
-`Send Messages` and the channel looks enabled but can't be replied in - so the
-startup log warns about exactly that:
+A channel it cannot see is invisible in every sense: no message content, no
+log line, nothing to opt out of twice.
+
+On connect the bot says where it will reply, and warns when a channel it is in
+cannot actually be replied in - a channel with View Channels but no Send
+Messages looks fine and is silent:
 
 ```
-WARN  gamtube.bot  my-server: #clips is opted in but the bot lacks send_messages there; it will not be able to reply
+INFO  gamtube.bot  my-server: will reply in 3 of 12 text channel(s): clips, memes, general
+WARN  gamtube.bot  my-server: #quiet is in scope but the bot lacks send_messages there; it will not be able to reply
 ```
 
-`Attach Files` is the one exception: without it every clip still works, it just
-goes out as a link with 🔒, so it is said once at startup rather than warned
-about per clip.
+`Attach Files` is the one gap that is not a warning: without it every clip
+still works, it just goes out as a link with 🔒, so it is said once at startup
+rather than per clip.
 
 ```
 INFO  gamtube.bot  my-server: #clips has no Attach Files for the bot, so every clip there goes out as a link
 ```
 
-A channel missing `View Channels` won't appear in the log at all, because the
-bot can't see it.
+If it can see nothing at all, that is a warning too, since it looks identical
+to a broken bot:
 
-It is also the permission the bot genuinely needs - without Embed Links its
-reply posts as plain text and never unfurls - so the marker and the capability
-cannot disagree.
+```
+WARN  gamtube.bot  my-server: the bot will reply in none of its 12 text channel(s) (it cannot see any of them)
+```
+
+## Requiring an explicit opt-in
+
+`CHANNEL_OPT_IN=true` inverts the default: the bot then refuses to act unless
+the channel carries an **explicit** permission overwrite granting it
+`OPT_IN_PERMISSION` (default `embed_links`, which is also what its reply needs
+in order to unfurl, so marker and capability cannot disagree).
+
+> Channel → **Edit Channel** → **Permissions** → add the bot (or its role) →
+> tick Embed Links → save.
+
+Use it when a server would rather a new channel be silent until someone
+deliberately enables it. The cost is exactly that: a channel created later does
+nothing, and the symptom is silence.
 
 What does **not** count as opting in:
 
 - **Role-level Embed Links from the invite.** Base role permissions aren't
-  overwrites. This is why step 3 says to leave it out of the invite.
+  overwrites, so the invite can carry the permission without enabling anything.
 - **An `@everyone` overwrite.** `embed_links` is commonly allowed for
   `@everyone`, and honouring it would opt in every channel on the server at
   once, so it is ignored.
 - **Inheriting from a category.** Only an overwrite on the channel itself (or,
   for a thread, on its parent channel) counts.
 
-Threads have no permissions of their own, so a thread follows its parent.
+In this mode a DM is refused outright, since a DM cannot carry an overwrite.
+With opt-in off the bot answers a DM like any other message it can see.
 
-On connect the bot logs which channels are enabled in each guild, and warns
-when a guild has none - an opt-in bot with nothing granted looks identical to a
-broken one, so check the log first:
+`OPT_IN_PERMISSION` changes which permission is the marker; it is validated
+against Discord's permission names at startup, so a typo is logged and the bot
+doesn't start rather than silently doing nothing. `DISCORD_GUILDS` /
+`DISCORD_CHANNELS` are a coarser allowlist applied before either rule.
 
-```
-INFO  gamtube.bot  my-server: enabled in clips, memes
-WARN  gamtube.bot  other-server: no channel grants embed_links to the bot, so it will do nothing here
-```
+### Blindness in that mode
 
-Set `CHANNEL_OPT_IN=false` to drop the requirement and act anywhere
-`DISCORD_GUILDS` / `DISCORD_CHANNELS` permit. `OPT_IN_PERMISSION` changes which
-permission is the marker; it is validated against Discord's permission names at
-startup, so a typo is logged and the bot doesn't start rather than silently
-doing nothing.
-
----
-
-## Making it blind
-
-Opting in controls what the bot *does*. It does not control what the bot
-*sees*: a bot is a server member and inherits `@everyone`, so on a normal
-server it can read every channel `@everyone` can and simply declines to act.
-If "it cannot see the rest of my server" has to be true rather than merely
-polite, it takes permission overwrites, because Discord has no per-bot
-visibility switch.
-
-**The bot will never do this for you.** Writing its own overwrites needs
-Manage Roles or Manage Channels, and a bot whose whole pitch is that it cannot
-see anything has no business holding either. This is an admin procedure, and
-no code depends on whether you follow it.
-
-Discord gives the bot a managed role of its own, named after the application
-(`gamtube`). Deny View Channels to that role where you don't want it, then
-allow it back on the channels you do.
-
-1. **Category → Edit Category → Permissions → add the `gamtube` role → set
-   View Channels to deny (red X) → save.** Repeat for every category. Channels
-   inherit from their category, so this is one tick per category rather than
-   one per channel.
-2. Channels **outside any category** inherit nothing, so each needs the same
-   deny on the channel itself.
-3. On each channel you want it in, **allow** View Channels to the bot
-   alongside the opt-in ticks from the section above. A channel-level allow
-   beats the category deny.
-
-That is the whole procedure. Order matters only for your own comfort: deny
-first and the bot goes quiet everywhere until you allow it back, allow first
-and nothing is ever interrupted.
-
-### The half-done state
-
-This is the state you will actually be in, because a server has more
-categories than anyone remembers. Some categories are denied, some are not,
-and the bot still sees everything under the ones you missed. Nothing breaks
-and nothing is logged as an error, because the opt-in gate is unaffected: the
-bot still acts only where it is opted in. The *only* symptom is a count, so
-the startup log reports it per guild.
-
-Done:
+Opting in controls what the bot *does*, not what it *sees*: it is a server
+member and inherits `@everyone`, so it can usually still read channels it will
+never act in. Closing that gap takes the same overwrites as **Excluding a
+channel** - deny View Channels to the bot's role at the category level, allow
+it back on the channels you opted in - and the startup log reports how far you
+got, because a half-done pass is otherwise invisible:
 
 ```
-INFO  gamtube.bot  my-server: enabled in clips, memes
 INFO  gamtube.bot  my-server: blind outside its opted-in channels (0 of 14 text channel(s) visible but not opted in)
-```
-
-Half-done:
-
-```
-INFO  gamtube.bot  my-server: enabled in clips, memes
 WARN  gamtube.bot  my-server: 7 of 14 text channel(s) visible but not opted in (general, random, offtopic, music, art, and 2 more); deny View Channels to the bot's role at the category level to make it blind - see docs/bot.md
 ```
 
-The count is the number to drive to zero. It is a warning and never a refusal
-to start: the gate is already correct, so a half-done setup is untidy rather
-than unsafe, and refusing to run would punish whoever is reading the log
-rather than whoever skipped a category.
+The count is the number to drive to zero, and only appears in this mode -
+with opt-in off, a channel it can see is a channel it works in, so there is
+nothing to compare. It is a warning and never a refusal to start: the gate is
+already correct, so a half-done pass is untidy rather than unsafe.
 
-Two things that read as half-done but aren't:
+Only text channels are counted; a voice channel it can see cannot carry a
+link. And a channel listed there may be one you opted in *improperly* - check
+it is not also in an "is in scope but the bot lacks ..." warning.
 
-- **A count that won't go below one or two.** A channel you opted in but where
-  the opt-in marker is absent counts here, so check it isn't the "`#x` is
-  opted in but the bot lacks ..." warning wearing a different hat. Anything
-  listed is either not opted in or not opted in *properly*.
-- **Voice channels and categories.** Only text channels are counted; a voice
-  channel the bot can see cannot carry a link.
-
-A channel it genuinely cannot see appears in no line at all, neither as
-enabled nor as visible, which is what success looks like from the log's point
-of view: silence about most of the server.
-
+---
 
 ## How it decides to act
 
-1. A message arrives in an opted-in channel. Links are matched against
+1. A message arrives in a channel the bot can see - or, with
+   `CHANNEL_OPT_IN=true`, one that explicitly opted in. Links are matched against
    `WATCH_DOMAINS` (default list in `bot/detect.py`) - a cheap prefilter so
    unrelated links never cost a yt-dlp call.
 2. Links wrapped as `<https://...>` are skipped. That syntax is how a user

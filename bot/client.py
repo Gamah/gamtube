@@ -27,6 +27,7 @@ from bot.handler import rehost
 from bot.scope import (
     REQUIRED_CAPABILITIES,
     allowed_by_ids,
+    actionable,
     missing_capabilities,
     opted_in,
     unopted_visible,
@@ -129,36 +130,76 @@ async def _wait_for_embeds(
         await asyncio.sleep(interval)
 
 
-def log_visibility(guild: discord.Guild, settings: BotSettings) -> None:
-    """Say how much of the guild the bot can see but has no business seeing.
+def report_guild(guild: discord.Guild, settings: BotSettings) -> None:
+    """Say where the bot will reply here, and where it will fall short.
 
-    Install permissions of nothing still leave the bot inheriting `@everyone`,
-    so the usual state is "sees everything, acts nowhere". The count below is
-    the number that should be zero once View Channels is denied to the bot's
-    role at the category level; it is a warning and never a refusal to start,
-    because the gate is already correct and the person to punish for a
-    half-done setup is not the one reading the log.
-
-    Text channels only: a voice channel it can see cannot carry a link.
+    "Why did nothing happen" is the question this bot gets asked most, so the
+    answer is logged once per guild at startup rather than reconstructed from
+    Discord's permission UI. The capability gaps matter more than the count:
+    a channel it can see but cannot post in is silent, and only this line
+    says so.
     """
     channels = guild.text_channels
-    unopted = unopted_visible(guild.me, channels, settings.opt_in_permission)
-    if not unopted:
-        log.info(
-            "%s: blind outside its opted-in channels (0 of %d text channel(s) "
-            "visible but not opted in)",
+    active = actionable(
+        guild.me, channels, settings.opt_in_permission,
+        opt_in=settings.channel_opt_in,
+    )
+    if not active:
+        log.warning(
+            "%s: the bot will reply in none of its %d text channel(s) (%s)",
             guild.name, len(channels),
+            f"no channel grants {settings.opt_in_permission}"
+            if settings.channel_opt_in else "it cannot see any of them",
         )
         return
-    names = [c.name for c in unopted[:5]]
-    if len(unopted) > len(names):
-        names.append(f"and {len(unopted) - len(names)} more")
-    log.warning(
-        "%s: %d of %d text channel(s) visible but not opted in (%s); deny View "
-        "Channels to the bot's role at the category level to make it blind - "
-        "see docs/bot.md",
-        guild.name, len(unopted), len(channels), ", ".join(names),
-    )
+
+    log.info("%s: will reply in %d of %d text channel(s): %s",
+             guild.name, len(active), len(channels), _names(active))
+
+    required = REQUIRED_CAPABILITIES
+    if settings.ack_mode == "reaction":
+        # Only needed in this mode, and its absence is quiet: the bot falls
+        # back to posting a message instead.
+        required += ("add_reactions",)
+    for channel in active:
+        gaps = missing_capabilities(guild.me, channel, required)
+        if gaps:
+            log.warning("%s: #%s is in scope but the bot lacks %s there; "
+                        "it will not be able to reply",
+                        guild.name, channel.name, ", ".join(gaps))
+            # No point adding that attachments won't work somewhere nothing
+            # will work.
+            continue
+        if missing_capabilities(guild.me, channel, ("attach_files",)):
+            # Not a gap in the required set: without it the upload is refused
+            # and the link goes out instead, which still works. Worth saying
+            # once rather than per clip.
+            log.info("%s: #%s has no Attach Files for the bot, "
+                     "so every clip there goes out as a link",
+                     guild.name, channel.name)
+
+    if settings.channel_opt_in:
+        # Only meaningful under opt-in: the gap between what it sees and what
+        # it may act in is what the category deny procedure closes.
+        unopted = unopted_visible(guild.me, channels, settings.opt_in_permission)
+        if unopted:
+            log.warning(
+                "%s: %d of %d text channel(s) visible but not opted in (%s); "
+                "deny View Channels to the bot's role at the category level to "
+                "make it blind - see docs/bot.md",
+                guild.name, len(unopted), len(channels), _names(unopted),
+            )
+        else:
+            log.info("%s: blind outside its opted-in channels (0 of %d text "
+                     "channel(s) visible but not opted in)",
+                     guild.name, len(channels))
+
+
+def _names(channels: list, limit: int = 5) -> str:
+    names = [c.name for c in channels[:limit]]
+    if len(channels) > len(names):
+        names.append(f"and {len(channels) - len(names)} more")
+    return ", ".join(names)
 
 
 def build_client(
@@ -184,51 +225,8 @@ def build_client(
             settings.media_agents() or "open",
             settings.warmup_channel_id or "off",
         )
-        if not settings.channel_opt_in:
-            log.info("channel opt-in disabled; acting wherever the allowlists permit")
-            return
-        # Worth logging loudly: an opt-in bot with nothing granted looks broken,
-        # and this is the line that explains why it is sitting there silently.
         for guild in client.guilds:
-            enabled = [
-                c.name for c in guild.text_channels
-                if opted_in(guild.me, c, settings.opt_in_permission)
-            ]
-            if enabled:
-                log.info("%s: enabled in %s", guild.name, ", ".join(enabled))
-                # All four permissions are granted per channel, so a channel
-                # ticked for Embed Links but missing Send Messages looks
-                # enabled and silently does nothing. Say so at startup.
-                for channel in guild.text_channels:
-                    if channel.name not in enabled:
-                        continue
-                    required = REQUIRED_CAPABILITIES
-                    if settings.ack_mode == "reaction":
-                        # Only needed in this mode, and its absence is quiet:
-                        # the bot falls back to posting a message instead.
-                        required += ("add_reactions",)
-                    if missing_capabilities(guild.me, channel, ("attach_files",)):
-                        # Not a gap in the required set: without it the upload
-                        # is refused and the link goes out instead, which still
-                        # works. Worth saying once rather than per clip.
-                        log.info(
-                            "%s: #%s has no Attach Files for the bot, "
-                            "so every clip there goes out as a link",
-                            guild.name, channel.name,
-                        )
-                    gaps = missing_capabilities(guild.me, channel, required)
-                    if gaps:
-                        log.warning(
-                            "%s: #%s is opted in but the bot lacks %s there; "
-                            "it will not be able to reply",
-                            guild.name, channel.name, ", ".join(gaps),
-                        )
-            else:
-                log.warning(
-                    "%s: no channel grants %s to the bot, so it will do nothing here",
-                    guild.name, settings.opt_in_permission,
-                )
-            log_visibility(guild, settings)
+            report_guild(guild, settings)
 
     @client.event
     async def on_message(message: discord.Message) -> None:

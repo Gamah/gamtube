@@ -53,7 +53,7 @@ gamtube/
 │   ├── client.py            # build_client / run_client: on_message, embed re-check, dispatch
 │   ├── config.py            # BotSettings (pydantic-settings), guild/channel/domain parsing
 │   ├── detect.py            # PURE: extract_candidates, is_candidate, norm_url, unembedded
-│   ├── scope.py             # PURE: allowed_by_ids, opted_in - channel opt-in via permissions
+│   ├── scope.py             # PURE: where it may act, what it can see, what it lacks
 │   ├── store.py             # PURE: MemoryStore - TTL + byte-budget, oldest evicted first
 │   ├── ranges.py            # PURE: parse_range - HTTP Range, because Discord sends them
 │   ├── upload.py            # PURE: Outcome enum + plan() - attach, shrink to fit, or link
@@ -388,35 +388,39 @@ re-hosted.
 Links wrapped as `<https://...>` are skipped on purpose: that syntax is how a
 Discord user suppresses an embed, so overriding it would be rude.
 
-**Per-channel opt-in is Discord's permission system, not bot state**
-(`bot/scope.py`). A channel is enabled when it carries an *explicit* permission
-overwrite granting the bot `OPT_IN_PERMISSION` (default `embed_links`, which is
-also the permission it needs for its reply to unfurl at all, so marker and
-capability can't disagree). Discord stores it, so it survives restarts with no
-file, DB or command to sync. Three things deliberately don't count: base role
-permissions from the invite (not overwrites), an `@everyone` overwrite (it
-would enable every channel at once), and category inheritance.
+**The bot acts wherever it can see a link, and exclusion is a View Channels
+deny.** `CHANNEL_OPT_IN` defaults to false. An earlier default required an
+explicit per-channel grant before the bot would act, which is stricter and was
+wrong in practice: a channel created later is silent, the symptom is nothing
+happening, and six ticks per channel is not how anyone expects a bot to behave.
+Denying the bot View Channels - per channel, or per category, which every
+channel under it inherits - is one overwrite and the thing admins already know
+how to do. Threads have no overwrites of their own (discord.py doesn't even
+give `Thread` an `overwrites_for`), so a thread follows its parent.
 
-The documented setup gives the bot **no permissions of its own** - the install
-link carries none. That is not the same as blind: a bot is a server member and
-inherits `@everyone`, which usually allows view/send/history/embed, so it can
-still see most channels. What gates it is that `opted_in` counts neither role
-permissions nor `@everyone` overwrites, so the explicit per-channel grant is
-the only thing that ever enables it. Genuine invisibility needs View Channels
-*denied* to the bot's role at the category level; Discord has no per-bot
-visibility switch. That is an admin procedure, written up in `docs/bot.md`,
-and the bot must never write those overwrites itself - it would need Manage
-Roles or Manage Channels, which is the opposite of the pitch. What the code
-does instead is report it: `scope.unopted_visible()` counts the text channels
-the bot can see but was never opted into, and `client.log_visibility()` warns
-per guild when that count is not zero. Zero is the target; it never refuses to
-start. `scope.missing_capabilities()` reports a
-half-ticked channel at startup, since Embed Links alone looks enabled but
-cannot reply. Moving the first three into the install settings is a supported
-fallback and needs no code change. Threads have no
-overwrites of their own - discord.py doesn't even give `Thread` an
-`overwrites_for` - so a thread follows its parent. `CHANNEL_OPT_IN=false` drops
-the requirement.
+The strict mode is kept behind the flag rather than deleted, because
+"nothing until someone enables it" is a real preference and the code is small
+and tested. With `CHANNEL_OPT_IN=true`, `scope.opted_in` requires an
+*explicit* overwrite granting `OPT_IN_PERMISSION` (default `embed_links`,
+which is also what the reply needs to unfurl, so marker and capability can't
+disagree), and three things deliberately don't count: base role permissions
+from the invite, an `@everyone` overwrite (it would enable every channel at
+once), and category inheritance. A DM is refused in that mode, since it can
+carry no overwrite, and answered with opt-in off.
+
+Either way the bot never writes an overwrite itself - that needs Manage Roles
+or Manage Channels, which is the opposite of the pitch - and Discord is the
+whole record, so there is no file, DB or command to sync.
+
+`client.report_guild()` is what makes a misconfiguration visible at startup,
+and the questions it answers are the ones the bot gets asked: where will it
+reply (`scope.actionable()`), where is it in scope but unable to post
+(`scope.missing_capabilities()`, a warning, since the channel looks fine and
+is silent), and where will attachments fail (`attach_files`, an info line
+only, since the link fallback still works). Under opt-in it also counts the
+channels it can see but was never opted into (`scope.unopted_visible()`),
+which is the number the category-deny procedure drives to zero. Nothing ever
+refuses to start.
 
 **`gamtube` logging needs `web/logsetup.configure_logging()`.** Uvicorn
 configures its own loggers and never touches the root, so without it an INFO
@@ -457,7 +461,7 @@ TRANSCODE_ENABLED=false         # re-encode to H.264 MP4 on ingest; false = serv
 ADMIN_PASSWORD=                 # password for /manage panel; leave empty to disable
 # bot (ignored by the web app; the web app's keys are ignored by the bot):
 DISCORD_BOT_TOKEN=              # empty = bot service stays disabled
-CHANNEL_OPT_IN=true             # channel must explicitly grant OPT_IN_PERMISSION
+CHANNEL_OPT_IN=false            # true: a channel must explicitly grant OPT_IN_PERMISSION
 OPT_IN_PERMISSION=embed_links   # validated against discord.Permissions at startup
 DISCORD_GUILDS=                 # comma-separated guild ids; empty = all
 DISCORD_CHANNELS=               # comma-separated channel ids; empty = all

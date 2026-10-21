@@ -13,6 +13,7 @@ from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
 from bot.agents import DEFAULT_CRAWLERS, is_crawler
 from bot.ranges import parse_range
 from bot.scope import (
+    actionable,
     allowed_by_ids,
     can_view,
     missing_capabilities,
@@ -440,6 +441,27 @@ eq("an @everyone overwrite is not an opt-in here either",
        "embed_links")],
    ["general"])
 eq("no channels at all", unopted_visible(me, [], "embed_links"), [])
+
+# ---- actionable: where the bot will actually reply. Opt-in off is the
+# default, so visibility alone decides and denying View Channels is the opt
+# out; opt-in on narrows it to the explicitly granted channels ----
+mixed = [VisChan("clips", visible, granted), VisChan("general", visible),
+         VisChan("staff", hidden)]
+
+eq("opt-in off: everything it can see",
+   [c.name for c in actionable(me, mixed, "embed_links", opt_in=False)],
+   ["clips", "general"])
+eq("opt-in off: a denied channel is still out",
+   actionable(me, [VisChan("staff", hidden)], "embed_links", opt_in=False), [])
+eq("opt-in on: only the granted one",
+   [c.name for c in actionable(me, mixed, "embed_links", opt_in=True)],
+   ["clips"])
+eq("opt-in on: a grant it cannot see does not count",
+   actionable(me, [VisChan("staff", hidden, granted)], "embed_links",
+              opt_in=True), [])
+eq("no channels at all, either mode",
+   (actionable(me, [], "embed_links", opt_in=False),
+    actionable(me, [], "embed_links", opt_in=True)), ([], []))
 
 
 # ---- byte accounting: the bot waits on this before posting the link, so

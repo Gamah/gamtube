@@ -106,6 +106,21 @@ def can_view(me, channel) -> bool:
     return getattr(permissions_for(me), "view_channel", False) is True
 
 
+def actionable(me, channels, permission: str, *, opt_in: bool) -> list:
+    """The channels the bot will actually reply in, in order.
+
+    With `opt_in` off - the default - that is every channel it can see, and
+    declining to act somewhere is an admin denying it View Channels there.
+    With `opt_in` on it is the far smaller set carrying an explicit grant of
+    `permission`. Both are "can see" first: an invisible channel is not a
+    candidate under either rule.
+    """
+    return [
+        c for c in channels
+        if can_view(me, c) and (not opt_in or opted_in(me, c, permission))
+    ]
+
+
 def unopted_visible(me, channels, permission: str) -> list:
     """The channels the bot can see but was never opted into.
 
