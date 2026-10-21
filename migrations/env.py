@@ -9,7 +9,7 @@ if config.config_file_name:
 # Pull DATABASE_URL from our app settings so there's a single source of truth.
 from web.config import get_settings
 from web.database import Base
-import web.models  # noqa: F401 — ensure models are registered on Base
+import web.models  # noqa: F401 - ensure models are registered on Base
 
 settings = get_settings()
 config.set_main_option("sqlalchemy.url", settings.database_url)

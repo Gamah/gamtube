@@ -3,7 +3,7 @@
 Nothing is attached and nothing is written to the database: the bytes sit in
 `bot.store.MemoryStore` for a few minutes, which is as long as Discord needs to
 fetch the video and build its embed. The reply is a bare URL so Discord
-actually unfurls it — wrapping it in `<>` or markdown suppresses the embed,
+actually unfurls it - wrapping it in `<>` or markdown suppresses the embed,
 which is the one thing we need.
 """
 
@@ -45,7 +45,7 @@ def _format_selector(cap: int) -> str:
 
 
 def _dimensions(path: Path) -> tuple[int | None, int | None, int | None]:
-    """(width, height, duration_seconds) — og:video:width/height matter.
+    """(width, height, duration_seconds) - og:video:width/height matter.
 
     Without dimensions Discord sizes the player badly or degrades the embed to
     a plain card, which is the failure this whole bot exists to avoid.
@@ -99,7 +99,7 @@ def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
                      url, time.monotonic() - t1)
 
     if size > cap:
-        log.info("skip %s — %.1fMB still over the %dMB item cap",
+        log.info("skip %s - %.1fMB still over the %dMB item cap",
                  url, size / 1048576, settings.max_item_mb)
         return None
 
@@ -115,7 +115,7 @@ def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
         log.info("normalise %s in %.1fs -> %.1fMB",
                  url, time.monotonic() - t2, size / 1048576)
         if size > cap:
-            log.info("skip %s — %.1fMB after mp4 normalisation", url, size / 1048576)
+            log.info("skip %s - %.1fMB after mp4 normalisation", url, size / 1048576)
             return None
 
     width, height, duration = _dimensions(src)
@@ -175,7 +175,7 @@ async def rehost(
     key = short_id_for(url)
     guard = f"{message.channel.id}:{key}"
     if guard in _inflight:
-        log.info("skip %s — already in flight", url)
+        log.info("skip %s - already in flight", url)
         return False
     _inflight.add(guard)
 

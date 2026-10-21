@@ -50,7 +50,7 @@ def _check_json(request: Request):
 
 def _fmt_size(b: int | None) -> str:
     if b is None:
-        return "—"
+        return "-"
     if b >= 1_073_741_824:
         return f"{b / 1_073_741_824:.1f} GB"
     if b >= 1_048_576:
@@ -85,7 +85,7 @@ def _fmt_expires(dt: datetime | None) -> str:
 
 def _fmt_dt(dt: datetime | None) -> str:
     if dt is None:
-        return "—"
+        return "-"
     return dt.strftime("%Y-%m-%d %H:%M")
 
 

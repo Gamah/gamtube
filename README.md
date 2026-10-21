@@ -3,9 +3,9 @@
 Re-host video from anywhere yt-dlp supports. Two front ends over one download
 pipeline:
 
-- **web** — paste a URL, get back a clean link at `your.domain/v/{id}`.
+- **web** - paste a URL, get back a clean link at `your.domain/v/{id}`.
   [docs/web.md](docs/web.md)
-- **bot** — a Discord bot that replies with a playable link when someone posts
+- **bot** - a Discord bot that replies with a playable link when someone posts
   a TikTok, Instagram or Facebook link Discord won't embed.
   [docs/bot.md](docs/bot.md)
 
@@ -16,7 +16,7 @@ No accounts. No algorithm. No ads. Just the video.
 ## Layout
 
 ```
-core/     yt-dlp + ffmpeg, short ids, title cleanup — no web, no Discord
+core/     yt-dlp + ffmpeg, short ids, title cleanup - no web, no Discord
 web/      FastAPI app: routes, templates, database, storage, expiry
 bot/      Discord client: link detection, download, in-memory store
 docs/     web.md, bot.md
@@ -24,8 +24,8 @@ tests/    runs with no venv, no token, no network
 ```
 
 Dependencies run one way: `web/` imports `bot/`, `bot/` imports `core/`, and
-`core/` imports neither. One process serves both — the bot's links are held in
-memory and served from `/d/{id}`, so they cannot be split apart — but the bot
+`core/` imports neither. One process serves both - the bot's links are held in
+memory and served from `/d/{id}`, so they cannot be split apart - but the bot
 is inert without `DISCORD_BOT_TOKEN`, and its failures are contained so the web
 app stays up regardless.
 
@@ -70,7 +70,7 @@ make up
 
 It pulls, re-deploys keeping every existing `.env` value, and prints versions.
 The first run after a version that adds a setting asks about it once and
-remembers the answer — including "no" — so later runs are silent. With no
+remembers the answer - including "no" - so later runs are silent. With no
 terminal attached it takes the defaults and carries on, so it's safe over a
 pipe or from a script.
 
@@ -79,7 +79,7 @@ The Discord bot is opt-in: no token, no bot, and nothing about it to configure.
 `make logs`, `make bot-logs` and `make update-ytdlp` cover the rest.
 
 A daily timer upgrades yt-dlp and restarts the service only when the version
-actually moves — it's imported as a library, so nothing picks up a new
+actually moves - it's imported as a library, so nothing picks up a new
 extractor set without a restart.
 
 ---

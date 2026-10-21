@@ -34,7 +34,7 @@ textarea.full  { border-color: #d00; }
 }
 .char-counter.warn { color: #c07000; font-weight: bold; }
 .char-counter.full { color: #d00; font-weight: bold; }
-.char-counter.full::after { content: ' — limit reached'; }
+.char-counter.full::after { content: ' - limit reached'; }
 button[type="submit"] { margin-top: .2rem; }
 #msg-ok { display: none; color: #155724; background: #d4edda; border: 1px solid #c3e6cb;
   padding: .6rem .9rem; border-radius: 4px; font-size: .88rem; margin-top: 1rem; }
@@ -52,7 +52,7 @@ button[type="submit"] { margin-top: .2rem; }
 <h2>Send feedback</h2>
 
 <form id="form" novalidate>
-  <label for="email">Email <span class="opt">(optional — only if you want a reply)</span></label>
+  <label for="email">Email <span class="opt">(optional - only if you want a reply)</span></label>
   <input type="email" id="email" name="email" placeholder="you@example.com" autocomplete="email">
 
   <label for="message">Message</label>
@@ -125,7 +125,7 @@ button[type="submit"] { margin-top: .2rem; }
       }
     } catch (err) {
       var errEl = document.getElementById('msg-err');
-      errEl.textContent = 'Network error — please try again.';
+      errEl.textContent = 'Network error - please try again.';
       errEl.style.display = 'block';
       submitBtn.disabled = false;
       submitBtn.textContent = 'Send feedback';

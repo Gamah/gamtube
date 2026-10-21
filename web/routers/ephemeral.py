@@ -1,4 +1,4 @@
-"""`/d/{key}` — the short-lived links the Discord bot posts.
+"""`/d/{key}` - the short-lived links the Discord bot posts.
 
 Backed by `bot.store.MemoryStore` on `app.state.bot_store`, so these routes
 read from this process's memory. Nothing here touches the database, the
@@ -90,7 +90,7 @@ def discord_page(key: str, request: Request) -> Response:
     settings = get_settings_bot()
     if settings.human_notice and not crawler:
         log.info("page %s served the human notice", key)
-        # No og: tags here — a person doesn't need them, and the video element
+        # No og: tags here - a person doesn't need them, and the video element
         # is left out so landing on the link doesn't start a download.
         return render("discord_human.html", source_url=item.source_url)
 

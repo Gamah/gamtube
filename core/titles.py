@@ -2,7 +2,7 @@
 
 The web app stores the cleaned title and renders it as `og:title`. The bot has
 no embed to title, so it uses the same text for the reply and as the attachment
-filename Discord shows above the player — hence `safe_filename` lives here too.
+filename Discord shows above the player - hence `safe_filename` lives here too.
 """
 
 import re
@@ -30,7 +30,7 @@ def safe_filename(title: str | None, ext: str, max_stem: int = 80) -> str:
     """Build `<stem><ext>` safe to send as a Discord attachment name.
 
     `ext` is taken verbatim (expects a leading dot). A title that reduces to
-    nothing — emoji-only, or all separators — falls back to "video".
+    nothing - emoji-only, or all separators - falls back to "video".
     """
     stem = clean_title(title) or ""
     # NFC first so composed accents survive; strip marks that render as boxes.

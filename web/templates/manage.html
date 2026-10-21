@@ -121,7 +121,7 @@ td.col-status span { display: inline-block; padding: .1rem .35rem; border-radius
         {% if r.transcoded == "yes" %}yes
         {% elif r.transcoded == "skipped" %}skipped
         {% elif r.transcoded == "no" %}no
-        {% else %}—{% endif %}
+        {% else %}-{% endif %}
       </td>
       <td class="col-size">{{ r.file_size }}</td>
       <td>{{ r.view_count }}</td>
@@ -231,12 +231,12 @@ td.col-status span { display: inline-block; padding: .1rem .35rem; border-radius
           } else if (action === 'delete') {
             var sp = tr.querySelector('.col-status span');
             sp.className = 's-expired'; sp.textContent = 'expired';
-            tr.querySelector('.col-size').textContent = '—';
+            tr.querySelector('.col-size').textContent = '-';
             tr.querySelector('.col-expires').textContent = '';
           } else if (action === 'unlist') {
             var sp = tr.querySelector('.col-status span');
             sp.className = 's-unlisted'; sp.textContent = 'unlisted';
-            tr.querySelector('.col-size').textContent = '—';
+            tr.querySelector('.col-size').textContent = '-';
             tr.querySelector('.col-expires').textContent = 'permanent';
           } else if (action === 'renew') {
             if (d.expires) tr.querySelector('.col-expires').textContent = d.expires;

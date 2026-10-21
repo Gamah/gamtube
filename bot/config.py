@@ -24,7 +24,7 @@ class BotSettings(BaseSettings):
     embed_wait_seconds: float = 3.0
 
     # The link is served from RAM, so these are memory budgets, not Discord's
-    # upload cap — nothing is attached. A clip over max_item_mb is skipped.
+    # upload cap - nothing is attached. A clip over max_item_mb is skipped.
     max_item_mb: int = 100
     max_memory_mb: int = 512
 
@@ -66,7 +66,7 @@ class BotSettings(BaseSettings):
     # anyone. Deliberately NOT crawler_user_agents: the page is fetched by
     # Discord's unfurler ("Discordbot"), the video by its media proxy, which is
     # a different service. Populate this from what actually appears in the log
-    # for /d/{key}/f — guessing it blocks Discord and kills every embed.
+    # for /d/{key}/f - guessing it blocks Discord and kills every embed.
     media_user_agents: str = ""
 
     # Verbose instrumentation while the bot is being tuned: full request
@@ -77,7 +77,7 @@ class BotSettings(BaseSettings):
 
     bot_temp_dir: str | None = None
 
-    # "extra": "ignore" matters — the bot and the web app share one .env, and
+    # "extra": "ignore" matters - the bot and the web app share one .env, and
     # pydantic-settings otherwise rejects a file holding the other's keys.
     model_config = {"env_file": ".env", "extra": "ignore"}
 

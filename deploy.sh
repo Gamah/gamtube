@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# deploy.sh — bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
+# deploy.sh - bootstrap gamtube on a fresh Ubuntu 24.04 LXC container
 #
 # One service, gamtube (uvicorn web.main:app). The Discord bot runs inside it
-# when DISCORD_BOT_TOKEN is set — it has to, because the links it posts are
+# when DISCORD_BOT_TOKEN is set - it has to, because the links it posts are
 # served from that process's memory.
 # Usage: sudo bash deploy.sh [--domain example.com] [--port 8000] [--data-dir DIR]
 #                            [--keep] [--bot-token TOKEN | --no-bot]
@@ -11,10 +11,10 @@
 # existing /opt/gamtube/.env as its default, so pressing enter keeps it.
 #   --keep  reuse every value already in .env without asking. Settings this
 #           version added that the existing .env has never seen are asked for
-#           once, and only when there's a terminal to ask on — so `make up`
+#           once, and only when there's a terminal to ask on - so `make up`
 #           works unattended and over a pipe.
 #   --bot-token / --no-bot  answer the Discord bot question without a prompt
-# On a re-run, nothing is ever silently reset — a setting only changes if you
+# On a re-run, nothing is ever silently reset - a setting only changes if you
 # type a new value or pass a flag.
 set -euo pipefail
 
@@ -208,7 +208,7 @@ fi
 
 # --- --keep: fill in only what this .env has never been asked ---
 # A routine `make up` is silent. The first run after a version that adds a
-# setting asks for it once, then records the answer — including "no" — so it
+# setting asks for it once, then records the answer - including "no" - so it
 # never asks again. No terminal means no question: the default is written and
 # the deploy carries on.
 if [[ "$KEEP" == "true" ]]; then
@@ -386,10 +386,10 @@ echo "==> Done."
 echo "    Service : systemctl status gamtube"
 echo "    Logs    : tail -f $DEPLOY_DIR/logs/app.log"
 if [[ -n "$DISCORD_BOT_TOKEN" ]]; then
-  echo "    Bot     : enabled, inside gamtube — make bot-logs"
+  echo "    Bot     : enabled, inside gamtube - make bot-logs"
   echo "              grant the bot Embed Links on a channel to switch it on there"
 else
-  echo "    Bot     : off (no DISCORD_BOT_TOKEN) — see docs/bot.md to enable"
+  echo "    Bot     : off (no DISCORD_BOT_TOKEN) - see docs/bot.md to enable"
 fi
 echo "    yt-dlp  : systemctl list-timers gamtube-update-ytdlp.timer"
 echo "    Submit  : curl -X POST $BASE_URL/submit -H 'Content-Type: application/json' -d '{\"url\":\"https://www.youtube.com/watch?v=jNQXAC9IVRw\"}'"

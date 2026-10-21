@@ -9,7 +9,7 @@ stalls. Pure and dependency-free so it can be tested directly.
 def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
     """Resolve a Range header to an inclusive `(start, end)` byte pair.
 
-    Returns `None` when the whole body should be sent — no header, a unit we
+    Returns `None` when the whole body should be sent - no header, a unit we
     don't support, or anything malformed, all of which RFC 9110 says to ignore
     rather than reject. Raises `ValueError` when the range is syntactically
     fine but cannot be satisfied, which is a `416`.
@@ -32,7 +32,7 @@ def parse_range(header: str | None, size: int) -> tuple[int, int] | None:
 
     try:
         if not start_raw:
-            # "bytes=-500" — the final 500 bytes.
+            # "bytes=-500" - the final 500 bytes.
             length = int(end_raw)
             if length <= 0:
                 raise ValueError("unsatisfiable suffix range")

@@ -19,7 +19,7 @@ traffic off the video, not to keep anyone out.
 
 # Substrings matched case-insensitively against the full UA string. Discord is
 # the one that matters; the rest are here so a link pasted elsewhere still
-# unfurls. Confirm against your own access log rather than trusting this list —
+# unfurls. Confirm against your own access log rather than trusting this list -
 # crawler UAs change without announcement.
 DEFAULT_CRAWLERS: tuple[str, ...] = (
     "discordbot",

@@ -1,4 +1,4 @@
-# Floors, not pins — deploy.sh installs with --upgrade so a re-run moves
+# Floors, not pins - deploy.sh installs with --upgrade so a re-run moves
 # everything forward. One venv serves both the web app and the bot.
 
 # shared (core/)

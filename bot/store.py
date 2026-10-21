@@ -10,7 +10,7 @@ unfurled a link it holds its own copy, so the link may expire. If Discord
 instead proxies each view from the origin, an evicted item means a dead embed
 in channel history. Raise `LINK_TTL_SECONDS` if that turns out to be the case.
 
-No discord.py, no FastAPI — the clock is injectable so the TTL and eviction
+No discord.py, no FastAPI - the clock is injectable so the TTL and eviction
 behaviour can be tested without sleeping.
 """
 

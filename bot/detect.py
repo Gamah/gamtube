@@ -1,6 +1,6 @@
 """Finding links worth re-hosting in a Discord message.
 
-Pure functions, no discord.py — this is the cheap prefilter that decides
+Pure functions, no discord.py - this is the cheap prefilter that decides
 whether a message is worth spending a yt-dlp call on. Whether Discord actually
 failed to embed the link is decided later, against the live message.
 """
@@ -75,7 +75,7 @@ def extract_candidates(
 def norm_url(url: str) -> tuple[str, str]:
     """Host and path, for comparing our candidates against Discord's embeds.
 
-    Discord echoes back the link it unfurled, but not always byte-identical —
+    Discord echoes back the link it unfurled, but not always byte-identical -
     a trailing slash or a tracking parameter may differ. Host plus path is the
     part that reliably survives the round trip.
     """

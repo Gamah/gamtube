@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     s3_access_key: str = ""
     s3_secret_key: str = ""
 
-    # "extra": "ignore" matters — the web app and the bot share one .env,
+    # "extra": "ignore" matters - the web app and the bot share one .env,
     # and pydantic-settings otherwise rejects a file holding the other's keys.
     model_config = {"env_file": ".env", "extra": "ignore"}
 

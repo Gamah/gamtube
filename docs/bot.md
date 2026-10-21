@@ -21,8 +21,8 @@ yt-dlp downloads into.
    for that long is indistinguishable from the bot ignoring you.
 3. It downloads the video, normalises it to H.264 mp4 if it isn't already, and
    puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
-4. It replies with `https://your.domain/d/{id}` — a bare URL, because wrapping
-   it in `<>` or markdown suppresses the embed, which is the one thing needed —
+4. It replies with `https://your.domain/d/{id}` - a bare URL, because wrapping
+   it in `<>` or markdown suppresses the embed, which is the one thing needed -
    then deletes the note.
 
    The link is a **new message** rather than an edit of the note, because a
@@ -42,7 +42,7 @@ an expired item means a dead embed in channel history.**
 
 That is cheap to settle once the bot is running: post a link, wait past the
 TTL, then try to play the embed from another account. If it still plays,
-Discord cached it. If it doesn't, raise `LINK_TTL_SECONDS` — or set it high
+Discord cached it. If it doesn't, raise `LINK_TTL_SECONDS` - or set it high
 enough that it stops mattering.
 
 ### Why not an attachment
@@ -62,7 +62,7 @@ In the Discord developer portal: **New Application** → **Bot** → copy the
 **token**. That token is the only required setting; The prompt
 masks what you type as `*`, so a pasted token is visibly there. `deploy.sh`
 asks for it once
-— including on a `make up` of an existing install — and an empty token means
+- including on a `make up` of an existing install - and an empty token means
 the bot never starts and nothing else about it needs configuring. You won't be
 asked again either way; `--bot-token TOKEN` and `--no-bot` set it without a
 prompt.
@@ -73,7 +73,7 @@ On the bot's page, under **Privileged Gateway Intents**, turn on **Message
 Content Intent**.
 
 Without it every message arrives with empty content and the bot sees no links
-at all — it will connect, log in, and do nothing. The intent is free to toggle
+at all - it will connect, log in, and do nothing. The intent is free to toggle
 for a personal bot; past roughly 100 servers Discord requires review.
 
 ### 3. Invite it with no permissions at all
@@ -90,7 +90,7 @@ Discord reads the scopes from what you saved, so there is one place to change
 this later rather than a URL to rebuild.
 
 **What this does and does not do.** It grants the bot no permissions of its
-own — but a bot is a server member, so it still inherits `@everyone`, which on
+own - but a bot is a server member, so it still inherits `@everyone`, which on
 most servers allows View Channels, Send Messages, Read Message History and
 Embed Links. Install permissions of `0` means "nothing extra", not "nothing".
 
@@ -101,7 +101,7 @@ never there by default.
 
 If you want it genuinely unable to see the rest of the server, **deny** View
 Channels to the bot's role at the category level and allow it on the channels
-you want — Discord has no per-bot visibility switch, so denial has to be an
+you want - Discord has no per-bot visibility switch, so denial has to be an
 overwrite. None of this changes the code.
 
 Granting View Channels / Send Messages / Read Message History in the install
@@ -137,7 +137,7 @@ state: Discord is the record, so it survives restarts and redeploys, and there
 is nothing to keep in sync.
 
 `Embed Links` is the one the bot actually tests for. Tick it without
-`Send Messages` and the channel looks enabled but can't be replied in — so the
+`Send Messages` and the channel looks enabled but can't be replied in - so the
 startup log warns about exactly that:
 
 ```
@@ -147,8 +147,8 @@ WARN  gamtube.bot  my-server: #clips is opted in but the bot lacks send_messages
 A channel missing `View Channels` won't appear in the log at all, because the
 bot can't see it.
 
-It is also the permission the bot genuinely needs — without Embed Links its
-reply posts as plain text and never unfurls — so the marker and the capability
+It is also the permission the bot genuinely needs - without Embed Links its
+reply posts as plain text and never unfurls - so the marker and the capability
 cannot disagree.
 
 What does **not** count as opting in:
@@ -164,7 +164,7 @@ What does **not** count as opting in:
 Threads have no permissions of their own, so a thread follows its parent.
 
 On connect the bot logs which channels are enabled in each guild, and warns
-when a guild has none — an opt-in bot with nothing granted looks identical to a
+when a guild has none - an opt-in bot with nothing granted looks identical to a
 broken one, so check the log first:
 
 ```
@@ -183,7 +183,7 @@ doing nothing.
 ## How it decides to act
 
 1. A message arrives in an opted-in channel. Links are matched against
-   `WATCH_DOMAINS` (default list in `bot/detect.py`) — a cheap prefilter so
+   `WATCH_DOMAINS` (default list in `bot/detect.py`) - a cheap prefilter so
    unrelated links never cost a yt-dlp call.
 2. Links wrapped as `<https://...>` are skipped. That syntax is how a user
    deliberately suppresses an embed, so the bot honours it.
@@ -213,8 +213,8 @@ to fix.
 
 Everything is held in RAM, so there are two budgets:
 
-- `MAX_ITEM_MB` (100) — skip any single video bigger than this.
-- `MAX_MEMORY_MB` (512) — total across all live links; oldest evicted first
+- `MAX_ITEM_MB` (100) - skip any single video bigger than this.
+- `MAX_MEMORY_MB` (512) - total across all live links; oldest evicted first
   when over, regardless of TTL.
 
 With a 300-second TTL the store only ever holds the last few minutes of
@@ -230,8 +230,8 @@ is the whole design of the gating:
 
 | Fetches | Which service | User agent |
 |---|---|---|
-| `/d/{id}` — the page, for `og:` tags | the unfurler | `Discordbot/...` |
-| `/d/{id}/f` — the video bytes | the media proxy | **not assumed here** |
+| `/d/{id}` - the page, for `og:` tags | the unfurler | `Discordbot/...` |
+| `/d/{id}/f` - the video bytes | the media proxy | **not assumed here** |
 
 ### The page gate (on by default)
 
@@ -251,7 +251,7 @@ not the crawler list.** Discord's media proxy is a different service from its
 unfurler, so putting `discordbot` here would most likely block the fetcher that
 actually retrieves your video and break every embed.
 
-So don't guess it — measure it. Every media fetch is logged:
+So don't guess it - measure it. Every media fetch is logged:
 
 ```
 INFO gamtube.bot  media abc123def456 GET range=bytes=0- ua='...' from 10.0.0.5
@@ -265,7 +265,7 @@ grep 'gamtube.bot  media' /opt/gamtube/logs/app.log
 ```
 
 That tells you two things at once: what to put in `MEDIA_USER_AGENTS`, and
-whether Discord fetches once or once per viewer — which is the same question
+whether Discord fetches once or once per viewer - which is the same question
 the TTL rests on. If you see one fetch and nothing more while several people
 watch, Discord cached it.
 
@@ -277,7 +277,7 @@ there to give people a friendlier page and keep casual traffic off the video.
 ## Logging while you tune it
 
 Turn `BOT_DEBUG=true` on for the first while. It adds full request headers on
-both `/d/` routes, per-stage timings, and — instead of one blind sleep — polls
+both `/d/` routes, per-stage timings, and - instead of one blind sleep - polls
 the message during the wait so the log says when the embed *actually* arrived.
 It costs a few extra Discord API calls per message, so turn it off once the
 numbers stop surprising you.
@@ -299,18 +299,18 @@ store evict abc123def456 (ttl) after 1 fetch(es), 3.1MB
 
 Four questions that log answers, in order of how much they matter:
 
-1. **`after Ns discord produced:`** — what Discord actually built. If a TikTok
+1. **`after Ns discord produced:`** - what Discord actually built. If a TikTok
    card comes back with `video=None`, the trigger is right; if it has a video
    URL, the bot shouldn't have acted and `EMBED_WAIT_SECONDS` or the predicate
    needs a look.
-2. **`media ... fetch=N ua=... from ...`** — who fetches the video, and how
+2. **`media ... fetch=N ua=... from ...`** - who fetches the video, and how
    often. One fetch while several people watch means Discord cached it; one per
    viewer means it proxies, and then both the TTL and `MEDIA_USER_AGENTS` need
    rethinking. This also hands you the UA to put in that list.
-3. **`store evict ... after N fetch(es)`** — whether items die before anyone
+3. **`store evict ... after N fetch(es)`** - whether items die before anyone
    fetched them (`after 0 fetch(es)` means the TTL is too short, or Discord
    never came).
-4. **the timings** — `download`, `shrink`, `normalise` and the end-to-end
+4. **the timings** - `download`, `shrink`, `normalise` and the end-to-end
    figure, which tell you whether the reply lands while the message is still
    on screen.
 
@@ -328,7 +328,7 @@ grep 'discord produced' /opt/gamtube/logs/app.log    # just the embed verdicts
 
 - **Remove the original dead embed.** A bot cannot edit someone else's
   message. You get the working video *plus* their broken card, unless you give
-  it Manage Messages and let it delete and repost on the user's behalf — a much
+  it Manage Messages and let it delete and repost on the user's behalf - a much
   more intrusive bot, and not what this is.
 - **Survive a restart.** The store is memory only, so every link the bot has
   posted dies when the service restarts. Given the short TTL that is usually

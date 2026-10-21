@@ -1,7 +1,7 @@
 # The web app
 
 Paste a URL, get back `your.domain/v/{short_id}`. The server downloads the
-video with yt-dlp and re-hosts it. No accounts, no homepage, no browse — two
+video with yt-dlp and re-hosts it. No accounts, no homepage, no browse - two
 use cases only: submit a URL and get a link, or arrive at a link and be served
 a video.
 
@@ -101,5 +101,5 @@ moves the file into `MEDIA_ROOT`. `S3StorageBackend` is a stub.
 
 SQLite for now; the DSN is the only thing that changes for PostgreSQL. Engine
 and session factory are built lazily behind `@lru_cache`, so importing
-`web.database` does not require a valid `.env`. Migrations are Alembic —
+`web.database` does not require a valid `.env`. Migrations are Alembic -
 `make migrate`.

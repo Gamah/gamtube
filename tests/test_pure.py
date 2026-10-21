@@ -1,6 +1,6 @@
 """The pure parts of the bot: link detection and filename/title handling.
 
-No token, no network, no venv — these are the only pieces of the bot that can
+No token, no network, no venv - these are the only pieces of the bot that can
 be exercised without a live gateway, which is why they live outside the
 discord.py handlers. Run: python3 tests/test_pure.py
 """

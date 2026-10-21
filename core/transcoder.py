@@ -79,7 +79,7 @@ def transcode(
 
     duration_us = _duration_us(probe)
     if not duration_us:
-        on_progress(None)  # indeterminate — duration unknown, shimmer until done
+        on_progress(None)  # indeterminate - duration unknown, shimmer until done
 
     proc = subprocess.Popen(
         [

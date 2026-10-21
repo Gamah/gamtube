@@ -8,13 +8,13 @@ Submissions are public; anyone who can reach the server can submit a URL. Viewin
 
 ## Stack
 
-- **Python 3.12 + FastAPI** — yt-dlp runs as an imported library (not subprocess)
-- **SQLAlchemy 2.0** — SQLite for MVP; swap DSN for PostgreSQL, no ORM changes needed
-- **Alembic** — schema migrations
-- **Jinja2** — server-rendered HTML, no JS framework
-- **ffmpeg/ffprobe** — optional H.264 transcoding via subprocess
-- **discord.py** — the bot's gateway client (`bot/`)
-- **pydantic-settings** — env var config; both processes read one `.env`
+- **Python 3.12 + FastAPI** - yt-dlp runs as an imported library (not subprocess)
+- **SQLAlchemy 2.0** - SQLite for MVP; swap DSN for PostgreSQL, no ORM changes needed
+- **Alembic** - schema migrations
+- **Jinja2** - server-rendered HTML, no JS framework
+- **ffmpeg/ffprobe** - optional H.264 transcoding via subprocess
+- **discord.py** - the bot's gateway client (`bot/`)
+- **pydantic-settings** - env var config; both processes read one `.env`
 
 ---
 
@@ -22,7 +22,7 @@ Submissions are public; anyone who can reach the server can submit a URL. Viewin
 
 ```
 gamtube/
-├── core/                    # SHARED. no web, no Discord, no DB — stdlib + yt-dlp + ffmpeg
+├── core/                    # SHARED. no web, no Discord, no DB - stdlib + yt-dlp + ffmpeg
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
 │   ├── titles.py            # clean_title() social-count stripping + safe_filename()
 │   ├── downloader.py        # yt-dlp wrapper → info dict + video path + thumbnail path
@@ -52,9 +52,9 @@ gamtube/
 │   ├── client.py            # build_client / run_client: on_message, embed re-check, dispatch
 │   ├── config.py            # BotSettings (pydantic-settings), guild/channel/domain parsing
 │   ├── detect.py            # PURE: extract_candidates, is_candidate, norm_url, unembedded
-│   ├── scope.py             # PURE: allowed_by_ids, opted_in — channel opt-in via permissions
-│   ├── store.py             # PURE: MemoryStore — TTL + byte-budget, oldest evicted first
-│   ├── ranges.py            # PURE: parse_range — HTTP Range, because Discord sends them
+│   ├── scope.py             # PURE: allowed_by_ids, opted_in - channel opt-in via permissions
+│   ├── store.py             # PURE: MemoryStore - TTL + byte-budget, oldest evicted first
+│   ├── ranges.py            # PURE: parse_range - HTTP Range, because Discord sends them
 │   └── handler.py           # rehost(): download → normalise → store → reply with the link
 ├── docs/
 │   ├── web.md               # routes, processing, expiry, storage
@@ -78,7 +78,7 @@ gamtube/
 ```
 
 **Dependencies run exactly one way: `web/` → `bot/` → `core/`.** `core/`
-imports neither of the others, and `bot/` must never import `web/` — that is
+imports neither of the others, and `bot/` must never import `web/` - that is
 what keeps the bot's logic testable without FastAPI, a database or a token.
 `web/routers/ephemeral.py` importing `bot.store` is the one edge in the other
 direction, and it is deliberate: the route serves what the bot put in memory.
@@ -92,7 +92,7 @@ options (`fmt`, `writethumbnail`, `crf`, `max_height`) whose defaults reproduce
 the web app's behaviour exactly. The bot passes non-defaults to aim under
 Discord's upload cap; don't change a default to suit one caller.
 
-No shared base template — there is no nav, no branding chrome, no shared layout. Each page is self-contained and minimal.
+No shared base template - there is no nav, no branding chrome, no shared layout. Each page is self-contained and minimal.
 
 ---
 
@@ -143,8 +143,8 @@ Same URL always produces the same 12-char hex ID. The `source_url` unique constr
 
 Engine and session factory are created lazily on first use via `@lru_cache`, so importing the module doesn't require a valid `.env`. Two entry points:
 
-- `get_db()` — FastAPI dependency (yields, auto-closes)
-- `SessionLocal()` — function returning a plain `Session`; used by worker functions which run outside request context
+- `get_db()` - FastAPI dependency (yields, auto-closes)
+- `SessionLocal()` - function returning a plain `Session`; used by worker functions which run outside request context
 
 ---
 
@@ -158,7 +158,7 @@ class StorageBackend(ABC):
     def get_local_path(self, key: str) -> Path | None: ...  # None for remote backends
 ```
 
-Storage key is `{short_id}.{ext}` — flat, no subdirectory. Extension is `.mp4` when transcoded, or the original yt-dlp output extension (e.g. `.webm`) when `TRANSCODE_ENABLED=false`.
+Storage key is `{short_id}.{ext}` - flat, no subdirectory. Extension is `.mp4` when transcoded, or the original yt-dlp output extension (e.g. `.webm`) when `TRANSCODE_ENABLED=false`.
 
 `LocalStorageBackend`: moves file into `MEDIA_ROOT/{key}`, returns `{MEDIA_BASE_URL}/{key}`.
 `S3StorageBackend`: stub, all methods raise `NotImplementedError` with `# TODO: boto3`.
@@ -173,12 +173,12 @@ Storage key is `{short_id}.{ext}` — flat, no subdirectory. Extension is `.mp4`
 
 **`transcoder.py`**: probes input with `ffprobe -show_streams -show_format` (JSON). If video codec is already `h264` and container is `mp4`, uses `-c copy`. Otherwise: `-c:v libx264 -crf 23 -preset superfast -c:a aac -b:a 128k`. `_duration_us()` checks both stream-level and format-level duration so mkv containers report progress correctly.
 
-**`web/worker.py`** — three public functions, all called via `BackgroundTasks`:
+**`web/worker.py`** - three public functions, all called via `BackgroundTasks`:
 
 `process_video(short_id, url, storage)`:
 1. `status = downloading` → download to `tempfile.mkdtemp(dir=TEMP_DIR)` → save thumbnail → write metadata to DB
 2. If `TRANSCODE_ENABLED`: `status = transcoding` → transcode to `{tmp}/{short_id}.mp4` → `storage.save(mp4, "{short_id}.mp4")`, `transcoded=True`
-3. Else: `storage.save(src, "{short_id}{src.suffix}")`, `transcoded=False` — no ffmpeg involved
+3. Else: `storage.save(src, "{short_id}{src.suffix}")`, `transcoded=False` - no ffmpeg involved
 4. `status = ready`, update `video_path`, `file_size_bytes`, `expires_at`
 5. On exception: `status = error`, store `error_message`; `finally`: `shutil.rmtree(tmp_dir)`
 
@@ -186,7 +186,7 @@ Storage key is `{short_id}.{ext}` — flat, no subdirectory. Extension is `.mp4`
 
 `reencode_video(short_id, storage)`: transcodes the already-stored raw file to H.264 MP4 in the background. Sets `status = reencoding` (video remains live for viewers during this), then `status = ready` + `transcoded=True` when done. Deletes the original raw file after the new MP4 is saved.
 
-Title cleanup: `core/titles.py` — `clean_title()` strips leading social-count noise that Facebook/Meta embeds in `og:title` (e.g. "1.2K views · 34 reactions · Actual Title" → "Actual Title").
+Title cleanup: `core/titles.py` - `clean_title()` strips leading social-count noise that Facebook/Meta embeds in `og:title` (e.g. "1.2K views · 34 reactions · Actual Title" → "Actual Title").
 
 ---
 
@@ -199,7 +199,7 @@ Title cleanup: `core/titles.py` — `clean_title()` strips leading social-count 
 | `POST` | `/submit` | public | Derive `short_id` → if exists return it; else create, enqueue, return immediately. Sets `submitter_id` cookie. |
 | `GET` | `/v/{short_id}` | public | `ready`/`reencoding` → render video.html; processing → render status.html; `error` → render error.html; `expired` → re-enqueue and show status |
 | `GET` | `/v/{short_id}/status.json` | public | `{"status": "...", "error": null}` |
-| `GET` | `/v/{short_id}/progress` | public | SSE stream; emits `{"stage": "...", "pct": 0–100 or null}` |
+| `GET` | `/v/{short_id}/progress` | public | SSE stream; emits `{"stage": "...", "pct": 0-100 or null}` |
 | `GET` | `/manage` | admin | Video table with search, pagination (50/page), actions |
 | `POST` | `/manage/v/{id}/renew` | admin | Extend expiry; re-downloads if expired/error, refreshes metadata otherwise |
 | `POST` | `/manage/v/{id}/delete` | admin | Delete file, set `status=expired` |
@@ -218,15 +218,15 @@ The submit form connects to the SSE progress endpoint after submission and shows
 
 Protected by HMAC-signed session cookie (`hmac(password, b"gamtube-admin-v1", sha256)`). Set `ADMIN_PASSWORD` in `.env`; leave empty to disable the panel entirely.
 
-Features: paginated video table (50/page), search by title/URL/short_id, thumbnails, per-row actions (renew with expiry selector, delete file, unlist, re-encode, nuke). All actions use JS fetch — no page reloads. Status and expiry cells update in-place; a toast fades in with the result.
+Features: paginated video table (50/page), search by title/URL/short_id, thumbnails, per-row actions (renew with expiry selector, delete file, unlist, re-encode, nuke). All actions use JS fetch - no page reloads. Status and expiry cells update in-place; a toast fades in with the result.
 
-The "reencoded" column shows `yes`/`no`/`—` (dash for non-ready rows). The "re-encode" button only appears on `ready` rows where `transcoded=False`. Clicking it sets status to `reencoding` immediately in the UI and removes the button.
+The "reencoded" column shows `yes`/`no`/`-` (dash for non-ready rows). The "re-encode" button only appears on `ready` rows where `transcoded=False`. Clicking it sets status to `reencoding` immediately in the UI and removes the button.
 
 ---
 
 ## SSE Progress (`web/progress.py`)
 
-In-process dict mapping `short_id → {stage, pct}`. Workers call `set_progress(short_id, stage, pct)`. The `/v/{short_id}/progress` SSE endpoint polls this at 0.5 s intervals and streams events to the client. `pct=None` means indeterminate — the UI shows a CSS shimmer animation.
+In-process dict mapping `short_id → {stage, pct}`. Workers call `set_progress(short_id, stage, pct)`. The `/v/{short_id}/progress` SSE endpoint polls this at 0.5 s intervals and streams events to the client. `pct=None` means indeterminate - the UI shows a CSS shimmer animation.
 
 Stages in order: `pending → downloading → transcoding → ready`. During yt-dlp stream merge the stage stays `downloading` but `pct=None` (shimmer + "Merging…" label). During transcoding with unknown duration (some containers), `pct=None` (shimmer + "Transcoding…").
 
@@ -259,13 +259,13 @@ route and the store.
 **`/d/{key}`** renders the `og:video` page; **`/d/{key}/f`** serves the bytes
 with `206` range support, because Discord's media proxy fetches by range.
 `og:video:width`/`height` come from an ffprobe of the final file and are not
-decorative — without them Discord sizes the player wrongly or falls back to a
+decorative - without them Discord sizes the player wrongly or falls back to a
 plain card, which is the failure the bot exists to fix.
 
 **Discord fetches the page and the video with two different services**, and
 conflating them is the trap here. The unfurler reads `/d/{key}` and identifies
 as `Discordbot`, so `bot/agents.py` can safely serve people a notice page
-instead of `og:` tags (`HUMAN_NOTICE`, on by default — only a crawler needs the
+instead of `og:` tags (`HUMAN_NOTICE`, on by default - only a crawler needs the
 metadata). The media proxy that fetches `/d/{key}/f` is something else, and its
 user agent is **not known here**: gating the bytes on the crawler list would
 block Discord's own fetcher and kill every embed. `MEDIA_USER_AGENTS` is a
@@ -275,7 +275,7 @@ and address so it can be filled from evidence rather than guessed.
 **The TTL is a bet.** `LINK_TTL_SECONDS` (300) assumes Discord keeps its own
 copy once it has unfurled a link, so the link may then die. If Discord instead
 proxies every view from the origin, expiry leaves a dead embed in channel
-history. This was never measured — settle it by posting a link, waiting out the
+history. This was never measured - settle it by posting a link, waiting out the
 TTL and trying to play the embed from another account, and raise the TTL if it
 fails. Attachment upload would sidestep the question entirely but is capped by
 the guild's `filesize_limit`, which is why it isn't the default.
@@ -283,7 +283,7 @@ the guild's `filesize_limit`, which is why it isn't the default.
 **The reply is two messages, not one edit.** Download plus any re-encode can
 run the better part of a minute, so `ACK_ENABLED` posts a short note
 immediately and the work happens inside `channel.typing()`. When the link is
-ready it goes out as a **new** message and the note is deleted — editing the
+ready it goes out as a **new** message and the note is deleted - editing the
 note to contain the link would be tidier but relies on Discord unfurling an
 edited message, which is not something to bet the whole feature on. A failure
 edits the note instead of deleting it, since that text carries no link and
@@ -297,7 +297,7 @@ quoting and comments.
 unfurled anything, so the message delivered to the handler never has embeds
 yet. The bot sleeps `EMBED_WAIT_SECONDS`, re-fetches the message, and only then
 judges it. The predicate is **"no embed with a playable video"**, not "no
-embeds" — TikTok and Instagram normally do produce an embed, just a dead
+embeds" - TikTok and Instagram normally do produce an embed, just a dead
 link-card. It is evaluated per link (`bot/detect.unembedded`), because a
 message holding both a YouTube link and a TikTok link must still get the TikTok
 re-hosted.
@@ -314,7 +314,7 @@ file, DB or command to sync. Three things deliberately don't count: base role
 permissions from the invite (not overwrites), an `@everyone` overwrite (it
 would enable every channel at once), and category inheritance.
 
-The documented setup gives the bot **no permissions of its own** — the install
+The documented setup gives the bot **no permissions of its own** - the install
 link carries none. That is not the same as blind: a bot is a server member and
 inherits `@everyone`, which usually allows view/send/history/embed, so it can
 still see most channels. What gates it is that `opted_in` counts neither role
@@ -325,13 +325,13 @@ visibility switch. `scope.missing_capabilities()` reports a
 half-ticked channel at startup, since Embed Links alone looks enabled but
 cannot reply. Moving the first three into the install settings is a supported
 fallback and needs no code change. Threads have no
-overwrites of their own — discord.py doesn't even give `Thread` an
-`overwrites_for` — so a thread follows its parent. `CHANNEL_OPT_IN=false` drops
+overwrites of their own - discord.py doesn't even give `Thread` an
+`overwrites_for` - so a thread follows its parent. `CHANNEL_OPT_IN=false` drops
 the requirement.
 
 **`gamtube` logging needs `web/logsetup.configure_logging()`.** Uvicorn
 configures its own loggers and never touches the root, so without it an INFO
-record from `gamtube.*` is dropped by `logging.lastResort` at WARNING —
+record from `gamtube.*` is dropped by `logging.lastResort` at WARNING -
 `isEnabledFor(INFO)` is False and the record isn't even created. It is called
 from `web/main.py` on startup; every bot log line depends on it, and nothing
 else will tell you they're missing.
@@ -343,7 +343,7 @@ embed-arrival delay is measured rather than assumed. It costs extra Discord API
 calls, so it is off by default.
 
 `bot/detect.py`, `bot/scope.py`, `bot/store.py`, `bot/ranges.py` and
-`core/titles.py` are **pure and must stay that way** — they are the only parts
+`core/titles.py` are **pure and must stay that way** - they are the only parts
 of this feature that can be exercised without a Discord token, and `tests/`
 does exactly that. New link, filename, eviction or range logic goes there
 rather than inside the discord.py handlers or the FastAPI route.
@@ -396,7 +396,7 @@ S3_SECRET_KEY=
 
 Both processes load the same `.env`, so **both `Settings` classes set
 `"extra": "ignore"`**. Without it pydantic-settings rejects the file for
-holding the other process's keys — adding a bot key would break the web app at
+holding the other process's keys - adding a bot key would break the web app at
 startup. Don't remove it.
 
 `TRANSCODE_ENABLED=false` (default): yt-dlp output is moved directly to storage. YouTube typically delivers VP9/AV1 in webm; modern browsers play these natively. Individual videos can be re-encoded on demand from the admin panel.
@@ -409,9 +409,9 @@ startup. Don't remove it.
 
 Videos expire after `VIDEO_TTL_HOURS` hours (default 24). On expiry the **file is deleted** and `status` is set to `expired`, but the **DB row is kept** so the video can be re-fetched on demand.
 
-**Cleanup loop** — started via FastAPI `lifespan` in `web/main.py`. Runs 30 s after startup, then every 10 minutes. Finds all `ready` rows where `expires_at <= now`, calls `storage.delete()`, and marks them `expired`.
+**Cleanup loop** - started via FastAPI `lifespan` in `web/main.py`. Runs 30 s after startup, then every 10 minutes. Finds all `ready` rows where `expires_at <= now`, calls `storage.delete()`, and marks them `expired`.
 
-**On-demand re-fetch** — when `GET /v/{short_id}` hits an `expired` row, `video_page` atomically flips status to `pending` and adds `process_video` to `BackgroundTasks`. The visitor sees the status/progress page while the video re-downloads.
+**On-demand re-fetch** - when `GET /v/{short_id}` hits an `expired` row, `video_page` atomically flips status to `pending` and adds `process_video` to `BackgroundTasks`. The visitor sees the status/progress page while the video re-downloads.
 
 ---
 
@@ -431,7 +431,7 @@ sudo bash deploy.sh --domain your.domain.tld
 
 Installs `python3.12 + ffmpeg`, creates a `gamtube` system user, copies the app to `/opt/gamtube`, creates a venv, writes `.env`, runs migrations, and registers one systemd unit: `gamtube` (uvicorn `web.main:app`), which carries the bot inside it.
 
-The bot is opt-in on the token alone — an empty `DISCORD_BOT_TOKEN` means
+The bot is opt-in on the token alone - an empty `DISCORD_BOT_TOKEN` means
 `web/main.py` never starts the client, and every bot code path is skipped. At
 the prompt, `-` clears an existing token. A leftover `gamtube-bot.service` from
 the earlier two-service layout is disabled and deleted on deploy.
@@ -439,11 +439,11 @@ the earlier two-service layout is disabled and deleted on deploy.
 **`make up` is the whole update, including a first-time bot setup.** It pulls,
 runs `deploy.sh --keep`, and prints versions. Adding a setting in a future
 version means adding it to the `EX_*` block, the defaults block and the `.env`
-heredoc — and, if it is a decision rather than a tunable, an `_env_has` prompt
+heredoc - and, if it is a decision rather than a tunable, an `_env_has` prompt
 in the `--keep` branch. Tunables should just take their default silently;
-nobody wants a questionnaire on every deploy. Re-running is safe — it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
+nobody wants a questionnaire on every deploy. Re-running is safe - it rsyncs code, upgrades packages, runs any new migrations, and restarts the service.
 
-Prompts for public base URL, data directory, admin password, transcoding, video TTL, and the Discord bot token. The bot's other settings are carried through from the existing `.env` rather than prompted, and defaulted on a first install. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** — a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` reuses every value already in `.env` without asking, but **asks once for a setting the existing `.env` has never seen** — and only when stdin is a terminal, so `make up` is safe unattended and over a pipe. An answer of blank is still an answer: it is written to `.env`, which is why `_env_has` exists (an empty value and a missing key must stay distinguishable) and why the question never comes back. `--domain`/`--port`/`--data-dir` override non-interactively, and `--bot-token`/`--no-bot` answer the bot question in scripts.
+Prompts for public base URL, data directory, admin password, transcoding, video TTL, and the Discord bot token. The bot's other settings are carried through from the existing `.env` rather than prompted, and defaulted on a first install. **Every prompt is pre-filled from the existing `/opt/gamtube/.env`, so pressing enter keeps the current value** - a re-run never silently resets config. The listen port is read back from the installed systemd unit for the same reason. `--keep` reuses every value already in `.env` without asking, but **asks once for a setting the existing `.env` has never seen** - and only when stdin is a terminal, so `make up` is safe unattended and over a pipe. An answer of blank is still an answer: it is written to `.env`, which is why `_env_has` exists (an empty value and a missing key must stay distinguishable) and why the question never comes back. `--domain`/`--port`/`--data-dir` override non-interactively, and `--bot-token`/`--no-bot` answer the bot question in scripts.
 
 The base URL prompt takes a full URL including scheme, because `MEDIA_BASE_URL` is derived from it (`{BASE_URL}/media`) and an `http://` value on an HTTPS site gets every video blocked as mixed content. `--domain` only ever produces `http://`; type the URL at the prompt for HTTPS.
 
@@ -454,7 +454,7 @@ On an existing guest the whole update is `make up` (git pull --ff-only +
 `deploy.sh` also installs `gamtube-update-ytdlp.timer`: daily (randomised up to 2 h),
 it runs `scripts/update-ytdlp.sh`, which pip-upgrades yt-dlp in the venv and restarts
 `gamtube` only when the version actually moved. yt-dlp is imported as a library, so
-nothing — web app or bot — picks up a new version without that restart. `requirements.txt` carries floors,
+nothing - web app or bot - picks up a new version without that restart. `requirements.txt` carries floors,
 not pins, and the deploy installs with `--upgrade` so a re-run moves every dep forward.
 
 ```bash

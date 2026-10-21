@@ -79,13 +79,13 @@ td.col-ref  a:hover { text-decoration: underline; }
         {% endif %}
       </td>
       <td class="col-email">
-        {% if fb.email %}<a href="mailto:{{ fb.email }}">{{ fb.email }}</a>{% else %}<span style="color:#ccc">—</span>{% endif %}
+        {% if fb.email %}<a href="mailto:{{ fb.email }}">{{ fb.email }}</a>{% else %}<span style="color:#ccc">-</span>{% endif %}
       </td>
       <td>
-        {% if fb.video_short_id %}<a href="/v/{{ fb.video_short_id }}" style="font-family:monospace;font-size:.78rem;">{{ fb.video_short_id }}</a>{% else %}<span style="color:#ccc">—</span>{% endif %}
+        {% if fb.video_short_id %}<a href="/v/{{ fb.video_short_id }}" style="font-family:monospace;font-size:.78rem;">{{ fb.video_short_id }}</a>{% else %}<span style="color:#ccc">-</span>{% endif %}
       </td>
       <td class="col-ref">
-        {% if fb.page_url %}<a href="{{ fb.page_url }}" title="{{ fb.page_url }}">{{ fb.page_url | truncate(40, true) }}</a>{% else %}<span style="color:#ccc">—</span>{% endif %}
+        {% if fb.page_url %}<a href="{{ fb.page_url }}" title="{{ fb.page_url }}">{{ fb.page_url | truncate(40, true) }}</a>{% else %}<span style="color:#ccc">-</span>{% endif %}
       </td>
       <td style="white-space:nowrap;font-size:.78rem;color:#888;">{{ fb.created_at }}</td>
       <td>

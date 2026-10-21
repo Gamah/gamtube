@@ -19,7 +19,7 @@ def _start_bot(app: FastAPI) -> asyncio.Task | None:
 
     It runs here rather than as its own service because the videos it posts
     live in this process's memory and are served by `web/routers/ephemeral.py`
-    — two processes could not share that. `bot.client.run_client` swallows its
+    - two processes could not share that. `bot.client.run_client` swallows its
     own failures, so a bot problem never takes the web app down.
     """
     from bot.config import get_bot_settings

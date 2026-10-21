@@ -6,7 +6,7 @@ bot `OPT_IN_PERMISSION`. Adding the bot to a channel is then a normal channel
 permission edit, it survives restarts because Discord stores it, and there is
 no file, database or command to keep in sync.
 
-No discord.py import — everything here is duck-typed against `.overwrites_for`,
+No discord.py import - everything here is duck-typed against `.overwrites_for`,
 `.roles` and `.parent`, which keeps it testable without a gateway.
 """
 
@@ -28,8 +28,8 @@ def allowed_by_ids(
 def permission_target(channel):
     """The object whose overwrites govern `channel`.
 
-    Threads have no overwrites of their own — discord.py doesn't even give
-    `Thread` an `overwrites_for` — so a thread is governed by its parent.
+    Threads have no overwrites of their own - discord.py doesn't even give
+    `Thread` an `overwrites_for` - so a thread is governed by its parent.
     """
     return getattr(channel, "parent", None) or channel
 
@@ -69,7 +69,7 @@ def opted_in(me, channel, permission: str) -> bool:
 
 # Everything the bot needs in a channel to do its job. With nothing granted at
 # the role level these are all per-channel, so a half-ticked channel is an easy
-# mistake — and a silent one, since the bot simply never replies.
+# mistake - and a silent one, since the bot simply never replies.
 REQUIRED_CAPABILITIES: tuple[str, ...] = (
     "view_channel",
     "send_messages",
@@ -83,8 +83,8 @@ def missing_capabilities(
 ) -> list[str]:
     """Which of `required` the bot effectively lacks in `channel`.
 
-    Unlike `opted_in`, this is the *effective* permission — overwrite plus role
-    plus category — because the question here is "can it actually work", not
+    Unlike `opted_in`, this is the *effective* permission - overwrite plus role
+    plus category - because the question here is "can it actually work", not
     "was it deliberately switched on".
     """
     permissions_for = getattr(channel, "permissions_for", None)

@@ -5,7 +5,7 @@ videos it serves live in this process's memory (`bot.store`) and the route that
 serves them is `web/routers/ephemeral.py`. `run_client` is deliberately
 supervised: if the bot fails, it logs and returns, and the web app carries on.
 
-This module imports nothing from `web/` — the dependency runs one way, so the
+This module imports nothing from `web/` - the dependency runs one way, so the
 bot's logic stays testable without FastAPI.
 
 Logging is deliberately chatty. Until this has run against a real guild the two
@@ -31,7 +31,7 @@ log = logging.getLogger("gamtube.bot")
 
 
 def in_scope(message: discord.Message, settings: BotSettings) -> tuple[bool, str]:
-    """(may act, reason). The reason is for the log — "why did nothing happen"
+    """(may act, reason). The reason is for the log - "why did nothing happen"
     is the question this bot will be asked most often."""
     guild = message.guild
     if not allowed_by_ids(
@@ -53,7 +53,7 @@ def in_scope(message: discord.Message, settings: BotSettings) -> tuple[bool, str
 def describe_embeds(message: discord.Message) -> str:
     """What Discord actually produced, which is the crux of the whole trigger.
 
-    A TikTok or Instagram link usually *does* embed — as a dead link-card — so
+    A TikTok or Instagram link usually *does* embed - as a dead link-card - so
     seeing type/url/video for each embed is what tells you whether the
     predicate is doing the right thing.
     """
@@ -78,7 +78,7 @@ async def _wait_for_embeds(
 
     Embeds arrive asynchronously, so the message handed to `on_message` never
     has them. In debug mode this polls instead of sleeping once, which turns
-    EMBED_WAIT_SECONDS from a guess into a measurement — the log says when the
+    EMBED_WAIT_SECONDS from a guess into a measurement - the log says when the
     embed actually landed.
     """
     started = time.monotonic()

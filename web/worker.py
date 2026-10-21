@@ -64,7 +64,7 @@ def refresh_metadata(short_id: str, url: str, storage: StorageBackend) -> None:
             db.query(Video).filter(Video.short_id == short_id).update(update)
             db.commit()
     except Exception:
-        pass  # source gone or unavailable — keep existing data
+        pass  # source gone or unavailable - keep existing data
     finally:
         db.close()
         shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -154,7 +154,7 @@ def reencode_video(short_id: str, storage: StorageBackend) -> None:
             set_progress(short_id, "error", None)
             return
 
-        # Codecs that consistently beat H.264 in file size — transcoding will bloat the file
+        # Codecs that consistently beat H.264 in file size - transcoding will bloat the file
         probe = _probe(local_path)
         src_codec = next(
             (s.get("codec_name") for s in probe.get("streams", []) if s.get("codec_type") == "video"),
@@ -181,7 +181,7 @@ def reencode_video(short_id: str, storage: StorageBackend) -> None:
             mp4_size = mp4.stat().st_size
 
             if original_size and mp4_size >= original_size:
-                # Transcoded result is larger — keep the original file, mark skipped
+                # Transcoded result is larger - keep the original file, mark skipped
                 set_progress(short_id, "ready", 100.0)
                 upd(status="ready", transcoded="skipped")
                 return

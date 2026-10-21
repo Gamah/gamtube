@@ -15,7 +15,7 @@ def configure_logging(debug: bool = False) -> logging.Logger:
 
     Uvicorn configures its own loggers and leaves the root alone, so without
     this an INFO record from `gamtube.*` is handled by `logging.lastResort` at
-    WARNING and silently dropped — `isEnabledFor(INFO)` is False, meaning the
+    WARNING and silently dropped - `isEnabledFor(INFO)` is False, meaning the
     record is never even created. Everything the bot logs would simply never
     appear in app.log.
 
