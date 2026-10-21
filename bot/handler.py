@@ -137,31 +137,82 @@ def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
     )
 
 
-async def _drop(ack: "discord.Message | None") -> None:
-    """Remove the acknowledgement once the link has landed."""
-    if ack is None:
-        return
-    try:
-        await ack.delete()
-    except discord.HTTPException:
-        # Deleting its own message needs no permission, so this is just a
-        # network hiccup; the note is cosmetic either way.
-        log.warning("could not delete the acknowledgement")
+class _Ack:
+    """However we said "working on it", and how to take it back.
 
-
-async def _fail(ack: "discord.Message | None", settings: BotSettings) -> None:
-    """Turn the acknowledgement into a short explanation.
-
-    Edited rather than replaced because it carries no link, so there is nothing
-    for Discord to unfurl and nothing lost by editing. Silence after saying
-    "working on it" would be worse than a one-line no.
+    A reaction leaves nothing behind once removed, which is tidier, but it
+    needs Add Reactions on the channel and is easy to miss. A message is
+    unmissable but appears and disappears. Neither affects how fast Discord
+    unfurls the link afterwards: a bot cannot set an embed's video field, so
+    the player only ever arrives on Discord's own schedule.
     """
-    if ack is None:
-        return
-    try:
-        await ack.edit(content=settings.ack_failed_text)
-    except discord.HTTPException:
-        log.warning("could not update the acknowledgement after a failure")
+
+    def __init__(self, settings: BotSettings, message: discord.Message) -> None:
+        self._settings = settings
+        self._message = message
+        self._note: discord.Message | None = None
+        self._reacted = False
+
+    async def start(self) -> None:
+        mode = self._settings.ack_mode
+        if mode == "none":
+            return
+        if mode == "reaction" and await self._react(self._settings.ack_emoji):
+            self._reacted = True
+            return
+        if mode == "reaction":
+            log.info("no Add Reactions here; acknowledging with a message instead")
+        await self._post()
+
+    async def done(self) -> None:
+        """The link has landed, so remove the acknowledgement."""
+        if self._reacted:
+            await self._unreact(self._settings.ack_emoji)
+        elif self._note is not None:
+            try:
+                await self._note.delete()
+            except discord.HTTPException:
+                # Deleting its own message needs no permission, so this is just
+                # a hiccup; the note is cosmetic either way.
+                log.warning("could not delete the acknowledgement")
+
+    async def failed(self) -> None:
+        """Say so, rather than going quiet after promising to work on it."""
+        if self._reacted:
+            await self._unreact(self._settings.ack_emoji)
+            await self._react(self._settings.ack_failed_emoji)
+        elif self._note is not None:
+            try:
+                # Edited, not replaced: this text has no link for Discord to
+                # unfurl, so there is nothing lost by editing in place.
+                await self._note.edit(content=self._settings.ack_failed_text)
+            except discord.HTTPException:
+                log.warning("could not update the acknowledgement after a failure")
+
+    async def _post(self) -> None:
+        try:
+            self._note = await self._message.reply(
+                self._settings.ack_text, mention_author=False
+            )
+        except discord.HTTPException:
+            # Not worth abandoning the job over; the link is the payload.
+            log.warning("could not post the acknowledgement")
+
+    async def _react(self, emoji: str) -> bool:
+        try:
+            await self._message.add_reaction(emoji)
+            return True
+        except discord.HTTPException:
+            return False
+
+    async def _unreact(self, emoji: str) -> None:
+        me = self._message.guild.me if self._message.guild else None
+        if me is None:
+            return
+        try:
+            await self._message.remove_reaction(emoji, me)
+        except discord.HTTPException:
+            log.warning("could not remove the acknowledgement reaction")
 
 
 async def rehost(
@@ -181,14 +232,9 @@ async def rehost(
 
     started = time.monotonic()
     tmp = Path(tempfile.mkdtemp(dir=settings.bot_temp_dir or None))
-    ack = None
+    ack = _Ack(settings, message)
     try:
-        if settings.ack_enabled:
-            try:
-                ack = await message.reply(settings.ack_text, mention_author=False)
-            except discord.HTTPException:
-                # Not worth abandoning the job over; the link is the payload.
-                log.warning("could not post the acknowledgement for %s", url)
+        await ack.start()
 
         # Keeps the typing indicator alive for the whole download, which is
         # free and needs no permission beyond posting.
@@ -196,13 +242,13 @@ async def rehost(
             item = await asyncio.to_thread(_prepare, url, tmp, settings)
 
         if item is None:
-            await _fail(ack, settings)
+            await ack.failed()
             return False
 
         store.put(key, item)
         link = f"{base_url.rstrip('/')}/d/{key}"
         await message.reply(link, mention_author=False)
-        await _drop(ack)
+        await ack.done()
         log.info("posted %s as %s (%.1fMB, %sx%s, held %ds, %.1fs end to end; "
                  "store now %d item(s)/%.1fMB)",
                  url, link, item.size / 1048576, item.width, item.height,
@@ -212,7 +258,7 @@ async def rehost(
 
     except Exception:
         log.exception("failed to rehost %s", url)
-        await _fail(ack, settings)
+        await ack.failed()
         return False
     finally:
         _inflight.discard(guard)

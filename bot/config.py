@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic_settings import BaseSettings
 
@@ -48,9 +49,16 @@ class BotSettings(BaseSettings):
     # looks like nothing happening. Acknowledge straight away, then replace the
     # note with the link. Posting the link as a NEW message rather than editing
     # the note is deliberate: a fresh message is reliably unfurled.
-    ack_enabled: bool = True
+    #   message  - reply "working on it...", then post the link and delete it
+    #   reaction - react to the original instead; nothing appears and vanishes,
+    #              but needs Add Reactions on the channel and is easy to miss.
+    #              Falls back to message if the permission isn't there.
+    #   none     - stay silent until the link is ready
+    ack_mode: Literal["message", "reaction", "none"] = "message"
     ack_text: str = "working on it\u2026"
     ack_failed_text: str = "could not fetch that one."
+    ack_emoji: str = "\u23f3"          # hourglass
+    ack_failed_emoji: str = "\u26a0\ufe0f"  # warning sign
 
     # Cap on uploads from one message, so a link dump can't become a flood.
     max_links_per_message: int = 3

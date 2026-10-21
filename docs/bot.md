@@ -27,8 +27,17 @@ yt-dlp downloads into.
 
    The link is a **new message** rather than an edit of the note, because a
    fresh message is reliably unfurled. On failure the note is edited to say so
-   instead of vanishing. `ACK_ENABLED=false` goes back to replying only when
-   done.
+   instead of vanishing.
+
+   `ACK_MODE` picks how it acknowledges: `message` (default), `reaction` (an
+   emoji on the original, which leaves nothing behind but needs Add Reactions
+   and falls back to a message without it), or `none`.
+
+   Note what this does *not* fix: the player appears when Discord finishes
+   unfurling, which is after our message lands, so for a moment the reply is a
+   bare link. A bot cannot set an embed's `video` field, so there is no way to
+   post the player pre-attached. Only an attachment upload avoids the gap, and
+   that is capped by the guild's `filesize_limit`.
 5. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
    with byte-range requests to build the player.
 6. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link

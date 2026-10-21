@@ -281,13 +281,21 @@ fails. Attachment upload would sidestep the question entirely but is capped by
 the guild's `filesize_limit`, which is why it isn't the default.
 
 **The reply is two messages, not one edit.** Download plus any re-encode can
-run the better part of a minute, so `ACK_ENABLED` posts a short note
-immediately and the work happens inside `channel.typing()`. When the link is
-ready it goes out as a **new** message and the note is deleted - editing the
-note to contain the link would be tidier but relies on Discord unfurling an
-edited message, which is not something to bet the whole feature on. A failure
-edits the note instead of deleting it, since that text carries no link and
-silence after "working on it" is worse than a one-line no.
+run the better part of a minute, so `ACK_MODE` acknowledges immediately and the
+work happens inside `channel.typing()`. When the link is ready it goes out as a
+**new** message and the acknowledgement is withdrawn - editing a note to
+contain the link would be tidier but relies on Discord unfurling an edited
+message, which is not something to bet the whole feature on. A failure says so
+rather than going quiet.
+
+`ACK_MODE=reaction` acknowledges with an emoji on the original message instead,
+which leaves nothing behind, but it needs Add Reactions on the channel and
+falls back to a message without it. Neither mode changes how fast the player
+appears: **a bot cannot set an embed's `video` field** (Discord's Create
+Message docs exclude `provider`, `video` and image dimensions), so the only
+ways to an inline video are a URL Discord unfurls or an attachment upload. The
+lag between our message and the player is Discord's, and clients sometimes
+don't re-render until you revisit the channel.
 
 `ACK_TEXT`/`ACK_FAILED_TEXT` defaults deliberately contain no `'`, `"` or `#`:
 `.env` is read by systemd as an `EnvironmentFile`, which treats those as
@@ -376,7 +384,7 @@ LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet 
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
-ACK_ENABLED=true                # post "working on it" first, swap in the link after
+ACK_MODE=message                # message | reaction | none while downloading
 BOT_DEBUG=false                 # header dumps, stage timings, embed-arrival polling
 HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags
 CRAWLER_USER_AGENTS=            # page gate; empty = bot/agents.py DEFAULT_CRAWLERS
