@@ -39,12 +39,20 @@ def transcode(
     *,
     crf: int = 23,
     max_height: int | None = None,
+    force_encode: bool = False,
 ) -> Path:
     """Normalise to H.264/AAC mp4, stream-copying when the input already is.
 
     `crf` and `max_height` are the bot's shrink knobs: a higher crf and a
     downscale are what bring an over-cap clip under Discord's limit. Setting
-    either away from the default rules out the stream-copy path.
+    either away from the default rules out the stream-copy path, and
+    `force_encode` rules it out directly, for an input whose container is
+    already mp4/H.264 but whose pixel format or profile is not playable.
+
+    `-movflags +faststart` is on both paths. It makes ffmpeg rewrite the file
+    with the `moov` index before the media, which a player reading over ranged
+    HTTP needs in order to start at all. On the copy path that is the only work
+    done, so a plain remux is cheap.
     """
     probe = _probe(input_path)
     streams = probe.get("streams", [])
@@ -56,18 +64,28 @@ def transcode(
         scale_args = ["-vf", f"scale=-2:{max_height}"]
 
     if (
-        not scale_args
+        not force_encode
+        and not scale_args
         and crf == 23
         and video
         and video.get("codec_name") == "h264"
         and input_path.suffix.lower() == ".mp4"
     ):
-        codec_args = ["-c", "copy"]
+        codec_args = ["-c", "copy", "-movflags", "+faststart"]
     else:
+        if not scale_args:
+            # libx264 rejects an odd width or height; trunc to even rather
+            # than failing on a source that has one.
+            scale_args = ["-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2"]
         codec_args = [
             *scale_args,
+            # yuv420p explicitly: libx264 otherwise keeps the input's pixel
+            # format, and yuv444p or 10 bit output plays in VLC and nowhere
+            # Discord's player or a browser can decode it.
             "-c:v", "libx264", "-crf", str(crf), "-preset", "superfast",
+            "-pix_fmt", "yuv420p",
             "-c:a", "aac", "-b:a", "128k",
+            "-movflags", "+faststart",
         ]
 
     if on_progress is None:

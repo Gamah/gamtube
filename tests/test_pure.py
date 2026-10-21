@@ -20,7 +20,9 @@ from bot.scope import (
     unopted_visible,
 )
 from bot.store import Item, MemoryStore
-from core.titles import clean_title
+from bot.upload import affordable_kbps, plan
+from core.mp4 import compat_verdict, moov_before_mdat, top_level_boxes
+from core.titles import clean_title, safe_filename
 
 fails = []
 
@@ -115,6 +117,23 @@ eq("no noise untouched", clean_title("Just A Title"), "Just A Title")
 eq("noise only falls back", clean_title("1.2K views · "), "1.2K views · ")
 eq("none passthrough", clean_title(None), None)
 eq("empty passthrough", clean_title(""), "")
+
+# ---- safe_filename: Discord shows it above the player ----
+eq("slashes removed", safe_filename("a/b\\c", ".mp4"), "a b c.mp4")
+eq("extension kept", safe_filename("clip", ".webm"), "clip.webm")
+eq("emoji-only falls back", safe_filename("🎉🎉", ".mp4"), "🎉🎉.mp4")
+eq("empty falls back", safe_filename("", ".mp4"), "video.mp4")
+eq("none falls back", safe_filename(None, ".mp4"), "video.mp4")
+eq("separators-only falls back", safe_filename("///", ".mp4"), "video.mp4")
+eq("control chars stripped", safe_filename("a\x00\x1fb", ".mp4"), "a b.mp4")
+eq("whitespace collapsed", safe_filename("a    b\n\tc", ".mp4"), "a b c.mp4")
+eq("trailing dot stripped", safe_filename("title...", ".mp4"), "title.mp4")
+eq("facebook noise cleaned too",
+   safe_filename("1.2K views · 34 reactions · Real Title", ".mp4"), "Real Title.mp4")
+eq("length capped", len(safe_filename("x" * 300, ".mp4")), 84)
+eq("cap does not leave trailing space",
+   safe_filename("y" * 79 + " zzz", ".mp4"), "y" * 79 + ".mp4")
+eq("quotes and pipes", safe_filename('a"b|c<d>e:f*g?h', ".mp4"), "a b c d e f g h.mp4")
 
 # ---- scope: the coarse allowlists ----
 eq("no allowlists allows all", allowed_by_ids(1, 2, set(), set()), True)
@@ -458,6 +477,133 @@ store.record_fetch("k", 200)
 eq("store reports complete", store.is_complete("k"), True)
 store.record_fetch("gone", 100)
 eq("recording an unknown key is harmless", store.is_complete("gone"), False)
+
+# ---- upload: attach, shrink to fit, or post a link ----
+MIB = 1024 * 1024
+TIER0, TIER2, TIER3 = 10 * MIB, 50 * MIB, 100 * MIB
+
+
+def act(size, cap, duration, floor=900, shrink=True):
+    return plan(size, cap, duration,
+                min_bitrate_kbps=floor, shrink_enabled=shrink).action
+
+
+eq("under the cap uploads", act(3 * MIB, TIER0, 20), "upload")
+eq("exactly the cap uploads", act(TIER0, TIER0, 20), "upload")
+eq("no cap means link", act(1 * MIB, 0, 20), "link")
+eq("over the cap with shrink off is a link", act(20 * MIB, TIER0, 20, shrink=False),
+   "link")
+eq("unknown duration will not be shrunk", act(20 * MIB, TIER0, None), "link")
+eq("zero duration will not be shrunk", act(20 * MIB, TIER0, 0), "link")
+# 15s into 10MiB is ~5.6Mbps, well over the floor; 180s is ~466kbps, under it.
+eq("short clip is worth shrinking", act(20 * MIB, TIER0, 15), "shrink")
+eq("3 minutes into 10MiB is not", act(20 * MIB, TIER0, 180), "link")
+eq("3 minutes into 50MiB is", act(80 * MIB, TIER2, 180), "shrink")
+eq("a low floor accepts it", act(20 * MIB, TIER0, 180, floor=400), "shrink")
+eq("boundary sits on the floor", act(20 * MIB, TIER0, 93, floor=900), "shrink")
+eq("just past the boundary is a link", act(20 * MIB, TIER0, 94, floor=900), "link")
+
+eq("kbps for 10MiB over 93s", round(affordable_kbps(TIER0, 93)), 902)
+eq("kbps for 50MiB over 466s", round(affordable_kbps(TIER2, 466)), 900)
+eq("kbps for 100MiB over 932s", round(affordable_kbps(TIER3, 932)), 900)
+eq("no duration, no answer", affordable_kbps(TIER0, None), None)
+eq("no cap, no answer", affordable_kbps(0, 30), None)
+
+reason = plan(20 * MIB, TIER0, 180, min_bitrate_kbps=900, shrink_enabled=True).reason
+eq("the reason names the floor", "900kbps floor" in reason, True)
+
+
+# ---- mp4 box walking (ISO/IEC 14496-12 4.2) ----
+def box(btype, payload=b"", *, size=None, large=False):
+    body = btype.encode() + payload
+    if large:
+        return (1).to_bytes(4, "big") + btype.encode() \
+            + (16 + len(payload)).to_bytes(8, "big") + payload
+    declared = len(body) + 4 if size is None else size
+    return declared.to_bytes(4, "big") + body
+
+
+ftyp = box("ftyp", b"isom")
+faststart = ftyp + box("moov", b"\0" * 32) + box("mdat", b"\0" * 64)
+tailmoov = ftyp + box("mdat", b"\0" * 64) + box("moov", b"\0" * 32)
+
+eq("walks three boxes", [t for t, _, _ in top_level_boxes(faststart)],
+   ["ftyp", "moov", "mdat"])
+eq("offsets are absolute", [o for _, o, _ in top_level_boxes(faststart)],
+   [0, 12, 52])
+eq("sizes are the declared ones", [s for _, _, s in top_level_boxes(faststart)],
+   [12, 40, 72])
+eq("faststart detected", moov_before_mdat(top_level_boxes(faststart)), True)
+eq("tail moov detected", moov_before_mdat(top_level_boxes(tailmoov)), False)
+eq("missing mdat is unknown", moov_before_mdat(top_level_boxes(ftyp)), None)
+eq("empty input walks to nothing", top_level_boxes(b""), [])
+eq("a bare header is not a box", top_level_boxes(b"\0\0\0"), [])
+
+# size == 1 means a 64 bit largesize follows the type
+large = ftyp + box("mdat", b"\0" * 32, large=True) + box("moov", b"\0" * 8)
+eq("64 bit size form", [t for t, _, s in top_level_boxes(large)],
+   ["ftyp", "mdat", "moov"])
+eq("64 bit size is read", top_level_boxes(large)[1][2], 48)
+
+# size == 0 means "to the end of the file"
+toeof = ftyp + (0).to_bytes(4, "big") + b"mdat" + b"\0" * 20
+eq("size zero runs to eof", top_level_boxes(toeof)[-1], ("mdat", 12, 28))
+
+# a uuid box carries a 16 byte extended type, and is skipped by its size
+uu = ftyp + box("uuid", b"\xab" * 16 + b"junk") + box("moov", b"\0" * 8)
+eq("uuid box skipped whole", [t for t, _, _ in top_level_boxes(uu)],
+   ["ftyp", "uuid", "moov"])
+
+# a box claiming more than there is, or less than its own header, ends the walk
+eq("oversized box ends the walk",
+   [t for t, _, _ in top_level_boxes(ftyp + box("mdat", b"\0" * 4, size=999))],
+   ["ftyp"])
+eq("undersized box ends the walk",
+   [t for t, _, _ in top_level_boxes(ftyp + box("mdat", b"\0" * 4, size=4))],
+   ["ftyp"])
+
+
+# ---- the compatibility gate over ffprobe output ----
+def probe(**over):
+    v = {"codec_type": "video", "codec_name": "h264", "pix_fmt": "yuv420p",
+         "profile": "High", "width": 576, "height": 1024}
+    v.update(over)
+    return {"streams": [v, {"codec_type": "audio", "codec_name": "aac"}]}
+
+
+good = top_level_boxes(faststart)
+bad_layout = top_level_boxes(tailmoov)
+
+eq("a sane file passes", compat_verdict(probe(), good).action, "ok")
+eq("tail moov is a remux", compat_verdict(probe(), bad_layout).action, "remux")
+eq("no boxes at all is a remux", compat_verdict(probe(), []).action, "remux")
+eq("vp9 is a re-encode", compat_verdict(probe(codec_name="vp9"), good).action,
+   "reencode")
+eq("10 bit is a re-encode",
+   compat_verdict(probe(pix_fmt="yuv420p10le"), good).action, "reencode")
+eq("4:4:4 is a re-encode", compat_verdict(probe(pix_fmt="yuv444p"), good).action,
+   "reencode")
+eq("full range 4:2:0 passes", compat_verdict(probe(pix_fmt="yuvj420p"), good).action,
+   "ok")
+eq("high10 profile is a re-encode",
+   compat_verdict(probe(profile="High 10"), good).action, "reencode")
+eq("constrained baseline passes",
+   compat_verdict(probe(profile="Constrained Baseline"), good).action, "ok")
+eq("odd height is a re-encode", compat_verdict(probe(height=721), good).action,
+   "reencode")
+eq("no dimensions is a re-encode", compat_verdict(probe(width=None), good).action,
+   "reencode")
+eq("no video stream is a re-encode",
+   compat_verdict({"streams": []}, good).action, "reencode")
+eq("opus audio is a re-encode",
+   compat_verdict({"streams": [probe()["streams"][0],
+                               {"codec_type": "audio", "codec_name": "opus"}]},
+                  good).action,
+   "reencode")
+eq("silent video passes",
+   compat_verdict({"streams": [probe()["streams"][0]]}, good).action, "ok")
+eq("the remux reason names the layout",
+   "moov" in compat_verdict(probe(), bad_layout).reason, True)
 
 if fails:
     print(f"FAIL ({len(fails)})")

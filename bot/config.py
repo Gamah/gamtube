@@ -5,6 +5,7 @@ from pydantic_settings import BaseSettings
 
 from bot.agents import DEFAULT_CRAWLERS
 from bot.detect import DEFAULT_DOMAINS
+from bot.upload import Outcome
 
 
 class BotSettings(BaseSettings):
@@ -24,10 +25,27 @@ class BotSettings(BaseSettings):
     # message. Too short and every link looks un-embedded; tune on a real guild.
     embed_wait_seconds: float = 3.0
 
-    # The link is served from RAM, so these are memory budgets, not Discord's
-    # upload cap - nothing is attached. A clip over max_item_mb is skipped.
+    # Memory budgets for the link path, not Discord's upload cap: a clip over
+    # max_item_mb is skipped outright, and max_memory_mb caps the whole store.
     max_item_mb: int = 100
     max_memory_mb: int = 512
+
+    # Attach the file when it fits the guild's filesize_limit, which already
+    # accounts for boosts. An attachment needs no store entry, no TTL, no
+    # warmup and no /d/ route, so it is the shorter path as well as the better
+    # one. Anything that does not fit, and any refusal, falls back to the link.
+    upload_enabled: bool = True
+
+    # Seconds one upload attempt gets before the link goes out instead.
+    # discord.py answers a 429 by sleeping and retrying, up to five times, so
+    # without a deadline a throttled upload blocks rather than falling back.
+    upload_timeout_seconds: float = 45.0
+
+    # Floor for a shrink aimed at the guild cap, video and audio together.
+    # Below it, fitting the clip costs more than the link path does: the link
+    # serves it untouched, so a ruined attachment is a downgrade. 900kbps is
+    # roughly 93s of clip inside a non-boosted 10MiB cap.
+    upload_min_bitrate_kbps: int = 900
 
     # Seconds a posted link keeps working. Short on purpose: Discord only needs
     # it long enough to unfurl. See bot/store.py for what this bets on.
@@ -61,12 +79,22 @@ class BotSettings(BaseSettings):
 
     ack_text: str = "working on it\u2026"
     ack_failed_text: str = "could not fetch that one."
-    # Left in place after the link lands, so the check reads as "handled"
-    # rather than flashing on and off; the link message is the real "done"
-    # signal. Set false to remove it once the link is posted.
-    ack_keep_reaction: bool = True
-    ack_emoji: str = "\u2705"        # white heavy check mark, renders green
-    ack_failed_emoji: str = "\u274c"  # cross mark
+
+    # The reaction is two separate markers. emoji_working goes on while the
+    # work runs and is deliberately neutral; when the work ends it is swapped
+    # for the one emoji that says how it ended, which stays put as the
+    # "handled" marker and is what docs/bot.md tabulates. That replaces the
+    # old ack_keep_reaction, whose check mark now means "uploaded natively"
+    # specifically. Set ack_outcome_reaction=false to just clear the working
+    # marker and leave no trail.
+    ack_outcome_reaction: bool = True
+    emoji_working: str = "\u23f3"          # hourglass, in progress
+    emoji_uploaded: str = "\u2705"         # check mark: attached natively
+    emoji_oversize: str = "\U0001f4e6"     # package: too big to attach
+    emoji_forbidden: str = "\U0001f512"    # lock: no Attach Files here
+    emoji_throttled: str = "\U0001f40c"    # snail: Discord rate limited us
+    emoji_fallback: str = "\U0001f914"     # thinking face: generic fallback
+    emoji_failed: str = "\u274c"           # cross mark: nothing was posted
 
     # Posting the link is what makes Discord fetch it, so the player always
     # lands after the message. Warming works around that: post the link in a
@@ -110,6 +138,16 @@ class BotSettings(BaseSettings):
     # "extra": "ignore" matters - the bot and the web app share one .env, and
     # pydantic-settings otherwise rejects a file holding the other's keys.
     model_config = {"env_file": ".env", "extra": "ignore"}
+
+    def outcome_emoji(self, outcome: Outcome) -> str:
+        return {
+            Outcome.UPLOADED: self.emoji_uploaded,
+            Outcome.OVERSIZE: self.emoji_oversize,
+            Outcome.FORBIDDEN: self.emoji_forbidden,
+            Outcome.THROTTLED: self.emoji_throttled,
+            Outcome.FALLBACK: self.emoji_fallback,
+            Outcome.FAILED: self.emoji_failed,
+        }[outcome]
 
     def guild_ids(self) -> set[int]:
         return _int_set(self.discord_guilds)

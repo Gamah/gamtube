@@ -2,26 +2,71 @@
 
 Discord gives TikTok, Instagram, Facebook and Reddit links a dead link-card
 with nothing to play. The bot watches for those links, downloads the video with
-yt-dlp, holds it in memory for a few minutes, and replies with a URL that
-Discord unfurls into a working player.
+yt-dlp, and replies with something that plays: a **native attachment** when the
+file fits the guild's upload cap, and otherwise a URL it holds in memory for a
+few minutes and lets Discord unfurl into a player.
 
 It runs **inside the web app's process**, and `/d/{id}` is its route. That is
-not an aesthetic choice: the video lives in this process's RAM, and a separate
-process could not serve it. Nothing is written to the database, the storage
-backend or the `videos` table, and nothing touches disk beyond the temp file
-yt-dlp downloads into.
+not an aesthetic choice: the video for a link lives in this process's RAM, and
+a separate process could not serve it. Nothing is written to the database, the
+storage backend or the `videos` table, and nothing touches disk beyond the temp
+file yt-dlp downloads into.
+
+---
+
+## Attachment first, link second
+
+An attachment is the better outcome in every way. Discord becomes the host, the
+player is there the instant the message lands, and none of the link machinery
+is involved: no store entry, no TTL, no warmup, no `/d/` route, no question
+about whether old embeds keep working. So the bot attaches the file whenever it
+fits the guild's `filesize_limit`, which is 10 MiB unboosted, 50 MiB at tier 2
+and 100 MiB at tier 3, and already accounts for boosts. [SOURCE: discord.py
+2.7.1 `Guild._PREMIUM_GUILD_LIMITS`]
+
+Over the cap, the bot makes **one** shrink attempt aimed at it, and only when
+fitting still leaves a watchable bitrate. `UPLOAD_MIN_BITRATE_KBPS` (900, video
+and audio together) is checked against the clip's probed duration, so what the
+cap really buys is a length:
+
+| Guild cap | Clip length that still clears 900 kbps |
+|---|---|
+| 10 MiB (no boosts) | up to about 1 m 33 s |
+| 50 MiB (tier 2) | up to about 7 m 46 s |
+| 100 MiB (tier 3) | up to about 15 m 32 s |
+
+A three minute clip inside a 10 MiB cap would have roughly 440 kbps for picture
+and sound, which is not worth looking at - and the link path serves that same
+clip untouched. So it goes out as a link, by design, not as a ruined
+attachment.
+
+Everything else falls back to the link too: no Attach Files in the channel,
+Discord throttling the upload, a 413, or any other failure. **The fallback is
+total.** A failed upload never leaves you with nothing, and the reaction says
+which fallback it was.
+
+Throttling is the one that needs a deadline rather than an exception handler.
+discord.py answers a 429 by sleeping for the `retry_after` Discord gives it and
+retrying, up to five times; it raises `RateLimited` only if the client was
+built with `max_ratelimit_timeout` and the wait exceeds it, and never for a
+global limit. [SOURCE: discord.py 2.7.1 `HTTPClient.request`] Left alone, a
+throttled upload therefore blocks instead of falling back, so the bot gives one
+attempt `UPLOAD_TIMEOUT_SECONDS` (45) and posts the link when that runs out.
+`UPLOAD_ENABLED=false` turns the whole attachment path off.
 
 ---
 
 ## The lifecycle
 
 1. Someone posts a TikTok link. Discord renders a useless card.
-2. The bot reacts to the message straight away and shows the typing indicator.
-   Download plus a re-encode can run most of a minute, and silence for that
-   long is indistinguishable from the bot ignoring you.
-3. It downloads the video, normalises it to H.264 mp4 if it isn't already, and
-   puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
-4. It replies with the link plus a short note:
+2. The bot reacts to the message with ⏳ straight away and shows the typing
+   indicator. Download plus a re-encode can run most of a minute, and silence
+   for that long is indistinguishable from the bot ignoring you.
+3. It downloads the video and runs the compatibility gate over it (below).
+4. If the file fits the guild's cap it is sent as an attachment, the ⏳ becomes
+   ✅, and that is the end of it: no link, no store entry, nothing to expire.
+5. Otherwise the bytes go into `bot/store.py` under `sha256(url)[:12]` and it
+   replies with the link plus a short note:
 
    ```
    https://your.domain/d/abc123def456
@@ -38,9 +83,8 @@ yt-dlp downloads into.
    fresh message is reliably unfurled. On failure the note is edited to say so
    instead of vanishing.
 
-   `ACK_MODE` picks how it acknowledges: `reaction` (default: a white check
-   mark on the original, left in place as a "handled" marker, red cross on
-   failure), `message`, or `none`. Reaction mode needs Add Reactions on the
+   `ACK_MODE` picks how it acknowledges: `reaction` (default, see the table
+   below), `message`, or `none`. Reaction mode needs Add Reactions on the
    channel and **silently falls back to a message without it** - if you are
    seeing "working on it..." when you expected a reaction, that is why, and the
    log says so:
@@ -52,14 +96,39 @@ yt-dlp downloads into.
    With `WARMUP_CHANNEL_ID` set, the link is warmed before this public post so
    the player arrives with the message rather than filling in a second later.
    See below.
-5. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
+6. Discord fetches that page, reads its `og:` tags, then fetches `/d/{id}/f`
    with byte-range requests to build the player.
-6. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
+7. `LINK_TTL_SECONDS` later (300 by default) the item is evicted and the link
    404s.
+
+Steps 5 to 7 only happen on the link path. An attachment is finished at step 4.
+
+### What the reaction means
+
+In reaction mode there are two markers: ⏳ while the work runs, swapped at the
+end for exactly one emoji that says how it ended. The outcome emoji **stays**
+put - it is the "handled" marker, and the thing you look up here.
+
+| Emoji | Meaning | What to do about it |
+|---|---|---|
+| ⏳ | downloading and converting | wait; it is replaced when the work ends |
+| ✅ | attached natively | nothing, this is the good one |
+| 📦 | fell back to a link: over the guild cap, or too long to fit it well | boost the server, or accept the link |
+| 🔒 | fell back to a link: no **Attach Files** in this channel | tick Attach Files on the channel overwrite |
+| 🐌 | fell back to a link: Discord throttled or stalled the upload | nothing; it is transient |
+| 🤔 | fell back to a link: the upload failed some other way | check the log, it names the HTTP status |
+| ❌ | nothing was posted at all | check the log; usually yt-dlp could not fetch it |
+
+Every one of them is a code default in `bot/config.py` (`EMOJI_WORKING`,
+`EMOJI_UPLOADED`, `EMOJI_OVERSIZE`, `EMOJI_FORBIDDEN`, `EMOJI_THROTTLED`,
+`EMOJI_FALLBACK`, `EMOJI_FAILED`), and each outcome gets a log line naming the
+reason. `ACK_OUTCOME_REACTION=false` clears ⏳ at the end and adds nothing,
+for a bot that leaves no trail. It replaces the old `ACK_KEEP_REACTION`, which
+cannot mean anything now that ✅ specifically means "attached natively".
 
 ### The assumption this rests on
 
-Step 6 is a bet: that once Discord has unfurled a link it holds its own copy,
+Step 7 is a bet: that once Discord has unfurled a link it holds its own copy,
 so the link may expire. **If Discord instead proxies each view from the origin,
 an expired item means a dead embed in channel history.**
 
@@ -102,12 +171,53 @@ publicly:
 grep -E 'warm |page |media ' /opt/gamtube/logs/app.log | tail -20
 ```
 
-### Why not an attachment
+### Why the link still exists
 
-Uploading the file as an attachment would make Discord the host outright, with
-no link and no TTL question at all. The catch is the attachment cap: Discord
-takes up to the guild's `filesize_limit`, which is small without boosts. The
-link route has no such ceiling, at the cost of the bet above.
+The link route has no size ceiling, at the cost of the bet above. That is the
+whole of its remaining job: everything that fits goes out as an attachment and
+never reaches any of this.
+
+---
+
+## Why a downloaded mp4 is not trusted as-is
+
+yt-dlp hands back whatever the platform served, and that file plays fine in VLC
+and on a phone while stalling on desktop - audio running, or a first frame and
+a picture that never advances. Two separate reasons, so the bot checks both
+before it decides anything else, on the upload path as well as the link path.
+Discord re-encodes attachments anyway, but shipping it a broken index is still
+not worth doing.
+
+**The index.** An mp4 is a sequence of boxes, each a 32 bit size and a 4
+character type (ISO/IEC 14496-12 4.2). The `moov` box is the index and `mdat`
+is the media, and a player reading over ranged HTTP - which is exactly how
+`/d/{id}/f` is fetched - cannot begin until it has the index. A `moov` sitting
+*after* `mdat` is the standard cause of that stall. `core/mp4.py` walks the top
+level boxes with no decoder and no ffprobe, so it is tested here on hand built
+atoms.
+
+**The streams.** 10 bit, 4:2:2 and 4:4:4 H.264 are all valid and all undecodable
+in a browser or Discord's player, as is non-AAC audio in an mp4 container, and
+libx264 will not take odd dimensions. So the file passes only if it is h264,
+`yuv420p`, a baseline/main/high profile, even dimensions, and aac audio or none.
+
+What happens then:
+
+| Verdict | Work | Cost |
+|---|---|---|
+| everything passes | served as downloaded | none |
+| streams fine, `moov` last | remux: `-c copy -movflags +faststart` | a moov rewrite |
+| anything else | full re-encode, also `+faststart` | a real encode |
+
+`+faststart` is on **both** ffmpeg argument sets in `core/transcoder.py`, which
+means the web app's own output gets it too. The log names which one happened
+and why:
+
+```
+gate https://...: already fine - h264/aac yuv420p with moov first
+gate https://...: remuxed in 0.4s -> 3.1MB - moov follows mdat, so ranged playback stalls
+gate https://...: re-encoded in 11.2s -> 4.0MB - pix_fmt is yuv420p10le, not yuv420p
+```
 
 ---
 
@@ -179,14 +289,15 @@ Since the bot holds no server-wide permissions, a channel is enabled by giving
 it everything it needs right there:
 
 > Channel → **Edit Channel** → **Permissions** → add the bot (or its role) →
-> tick all four → save.
+> tick all five → save.
 
 | Permission | Why |
 |---|---|
 | View Channels | see the channel exists at all |
 | Send Messages | post the reply |
 | Read Message History | re-read the message after Discord unfurls it |
-| Add Reactions | the default acknowledgement is a reaction |
+| Add Reactions | the acknowledgement and the outcome marker are reactions |
+| Attach Files | send the video as an attachment; without it every clip falls back to a link and carries 🔒 |
 | **Embed Links** | the opt-in marker, and what makes the reply unfurl |
 
 Removing them opts the channel back out. There is no command and no stored
@@ -342,11 +453,13 @@ to fix.
 
 ## Memory
 
-Everything is held in RAM, so there are two budgets:
+A link is served from RAM, so there are two budgets. They are **not** Discord's
+upload cap, which is the guild's and much smaller:
 
 - `MAX_ITEM_MB` (100) - skip any single video bigger than this.
 - `MAX_MEMORY_MB` (512) - total across all live links; oldest evicted first
-  when over, regardless of TTL.
+  when over, regardless of TTL. An attachment never enters the store, so it
+  costs nothing here.
 
 With a 300-second TTL the store only ever holds the last few minutes of
 activity, so the steady state sits far below the budget. Eviction is there for
@@ -420,8 +533,17 @@ message 1234 in #clips has 1 candidate(s): https://www.tiktok.com/@u/video/1
 after 3.0s discord produced: [type='link' url='https://...' video=None thumb=True title='...']
 1 link(s) need rehosting
 download https://... in 2.4s -> .mp4 3.1MB (extractor=TikTok)
-prepared https://... : 3.1MB 576x1024 14s total 2.5s
-posted https://... as https://tube.4tw.pw/d/abc123def456 (3.1MB, 576x1024, held 300s, 3.0s end to end; store now 1 item(s)/3.1MB)
+gate https://...: remuxed in 0.4s -> 3.1MB - moov follows mdat, so ranged playback stalls
+prepared https://... : 3.1MB 576x1024 14s total 2.5s (attach=True: 3254579 fits the 10485760 byte cap)
+uploaded https://... as Real Title.mp4 (3.1MB, 576x1024, 3.4s end to end; no store entry, no link)
+```
+
+and, when it has to fall back:
+
+```
+prepared https://... : 22.0MB 1080x1920 183s total 24.1s (attach=False: fitting 183s into 10485760 bytes allows only 458kbps, under the 900kbps floor)
+falling back to a link for https://...: fitting 183s into 10485760 bytes allows only 458kbps, under the 900kbps floor
+posted https://... as https://tube.4tw.pw/d/abc123def456 (oversize: 22.0MB, 1080x1920, held 300s, 24.6s end to end; store now 1 item(s)/22.0MB)
 page abc123def456 crawler=True ua='Mozilla/5.0 (compatible; Discordbot/2.0...)' from 10.0.0.5
 media abc123def456 GET fetch=1 range=bytes=0- ua='...' from 10.0.0.5
 media abc123def456 serving all 3.1MB
@@ -462,9 +584,10 @@ grep 'discord produced' /opt/gamtube/logs/app.log    # just the embed verdicts
   message. You get the working video *plus* their broken card, unless you give
   it Manage Messages and let it delete and repost on the user's behalf - a much
   more intrusive bot, and not what this is.
-- **Survive a restart.** The store is memory only, so every link the bot has
+- **Survive a restart.** The store is memory only, so every *link* the bot has
   posted dies when the service restarts. Given the short TTL that is usually
-  indistinguishable from normal expiry.
+  indistinguishable from normal expiry. Attachments are unaffected: once
+  uploaded they are Discord's, not ours.
 - **Handle links inside code blocks or spoiler tags.** They are treated like
   any other text.
 
