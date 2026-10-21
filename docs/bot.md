@@ -80,14 +80,24 @@ https://discord.com/oauth2/authorize?client_id={APP_ID}
 Discord reads the scopes from what you saved, so there is one place to change
 this later rather than a URL to rebuild.
 
-**Granting nothing server-wide is the point.** The bot cannot see a channel it
-hasn't been added to, so `on_message` never fires there and it never receives
-message content from the rest of the server. "Add the bot to this channel" then
-means exactly one thing instead of two layers.
+**What this does and does not do.** It grants the bot no permissions of its
+own — but a bot is a server member, so it still inherits `@everyone`, which on
+most servers allows View Channels, Send Messages, Read Message History and
+Embed Links. Install permissions of `0` means "nothing extra", not "nothing".
 
-If you later decide you'd rather it be able to work anywhere by default, move
-View Channels / Send Messages / Read Message History into the install settings
-and keep only Embed Links per channel. Nothing in the code changes.
+So the bot can usually still *see* your channels. What stops it *acting* is
+that `opted_in` ignores both role-level permissions and `@everyone` overwrites:
+only an explicit overwrite naming the bot or its own role counts, and that is
+never there by default.
+
+If you want it genuinely unable to see the rest of the server, **deny** View
+Channels to the bot's role at the category level and allow it on the channels
+you want — Discord has no per-bot visibility switch, so denial has to be an
+overwrite. None of this changes the code.
+
+Granting View Channels / Send Messages / Read Message History in the install
+settings instead is the other direction: it makes the bot able to work anywhere
+and leaves Embed Links as the only per-channel tick.
 
 ### 4. Check the public URL
 

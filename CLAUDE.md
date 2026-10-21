@@ -301,11 +301,14 @@ file, DB or command to sync. Three things deliberately don't count: base role
 permissions from the invite (not overwrites), an `@everyone` overwrite (it
 would enable every channel at once), and category inheritance.
 
-The documented setup grants the bot **no server-wide permissions at all** — the
-install link carries none — so all four of `view_channel`, `send_messages`,
-`read_message_history` and `embed_links` are granted per channel. The bot then
-cannot see a channel it hasn't been added to and never receives message content
-from the rest of the server. `scope.missing_capabilities()` reports a
+The documented setup gives the bot **no permissions of its own** — the install
+link carries none. That is not the same as blind: a bot is a server member and
+inherits `@everyone`, which usually allows view/send/history/embed, so it can
+still see most channels. What gates it is that `opted_in` counts neither role
+permissions nor `@everyone` overwrites, so the explicit per-channel grant is
+the only thing that ever enables it. Genuine invisibility needs View Channels
+*denied* to the bot's role at the category level; Discord has no per-bot
+visibility switch. `scope.missing_capabilities()` reports a
 half-ticked channel at startup, since Embed Links alone looks enabled but
 cannot reply. Moving the first three into the install settings is a supported
 fallback and needs no code change. Threads have no
