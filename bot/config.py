@@ -12,7 +12,7 @@ class BotSettings(BaseSettings):
     # as enabled when it explicitly grants the bot opt_in_permission. Set
     # channel_opt_in=false to act everywhere the allowlists below permit.
     channel_opt_in: bool = True
-    opt_in_permission: str = "attach_files"
+    opt_in_permission: str = "embed_links"
 
     # Coarse allowlists applied before the opt-in check; empty = no limit.
     discord_guilds: str = ""

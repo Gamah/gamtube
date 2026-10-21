@@ -181,30 +181,30 @@ guild = Guild(everyone)
 me = Me([everyone, botrole], guild)
 
 eq("explicit member grant",
-   opted_in(me, Chan({me: Ov(attach_files=True)}), "attach_files"), True)
+   opted_in(me, Chan({me: Ov(embed_links=True)}), "embed_links"), True)
 eq("explicit bot-role grant",
-   opted_in(me, Chan({botrole: Ov(attach_files=True)}), "attach_files"), True)
+   opted_in(me, Chan({botrole: Ov(embed_links=True)}), "embed_links"), True)
 eq("@everyone grant does not opt in",
-   opted_in(me, Chan({everyone: Ov(attach_files=True)}), "attach_files"), False)
+   opted_in(me, Chan({everyone: Ov(embed_links=True)}), "embed_links"), False)
 eq("no overwrites at all",
-   opted_in(me, Chan(), "attach_files"), False)
+   opted_in(me, Chan(), "embed_links"), False)
 eq("explicit deny is not a grant",
-   opted_in(me, Chan({botrole: Ov(attach_files=False)}), "attach_files"), False)
+   opted_in(me, Chan({botrole: Ov(embed_links=False)}), "embed_links"), False)
 eq("a different permission does not count",
-   opted_in(me, Chan({botrole: Ov(send_messages=True)}), "attach_files"), False)
+   opted_in(me, Chan({botrole: Ov(send_messages=True)}), "embed_links"), False)
 eq("configurable permission name",
    opted_in(me, Chan({botrole: Ov(send_messages=True)}), "send_messages"), True)
 eq("thread inherits its parent's grant",
-   opted_in(me, Thread(Chan({botrole: Ov(attach_files=True)})), "attach_files"), True)
+   opted_in(me, Thread(Chan({botrole: Ov(embed_links=True)})), "embed_links"), True)
 eq("thread with no parent grant",
-   opted_in(me, Thread(Chan()), "attach_files"), False)
+   opted_in(me, Thread(Chan()), "embed_links"), False)
 eq("missing member object",
-   opted_in(None, Chan({botrole: Ov(attach_files=True)}), "attach_files"), False)
+   opted_in(None, Chan({botrole: Ov(embed_links=True)}), "embed_links"), False)
 eq("channel without overwrites_for",
-   opted_in(me, object(), "attach_files"), False)
+   opted_in(me, object(), "embed_links"), False)
 eq("guild with no default_role still checks roles",
-   opted_in(Me([botrole], Guild(None)), Chan({botrole: Ov(attach_files=True)}),
-            "attach_files"), True)
+   opted_in(Me([botrole], Guild(None)), Chan({botrole: Ov(embed_links=True)}),
+            "embed_links"), True)
 
 if fails:
     print(f"FAIL ({len(fails)})")

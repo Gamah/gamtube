@@ -260,10 +260,10 @@ Discord user suppresses an embed, so overriding it would be rude.
 
 **Per-channel opt-in is Discord's permission system, not bot state**
 (`bot/scope.py`). A channel is enabled when it carries an *explicit* permission
-overwrite granting the bot `OPT_IN_PERMISSION` (default `attach_files`).
+overwrite granting the bot `OPT_IN_PERMISSION` (default `embed_links`).
 Discord stores it, so it survives restarts with no file, DB or command to sync.
 Three things deliberately don't count: base role permissions from the invite
-(not overwrites — which is why `docs/bot.md` tells you to leave Attach Files
+(not overwrites — which is why `docs/bot.md` tells you to leave Embed Links
 out of the invite), an `@everyone` overwrite (it would enable every channel at
 once), and category inheritance. Threads have no overwrites of their own —
 discord.py doesn't even give `Thread` an `overwrites_for` — so a thread follows
@@ -293,7 +293,7 @@ ADMIN_PASSWORD=                 # password for /manage panel; leave empty to dis
 # bot (ignored by the web app; the web app's keys are ignored by the bot):
 DISCORD_BOT_TOKEN=              # empty = bot service stays disabled
 CHANNEL_OPT_IN=true             # channel must explicitly grant OPT_IN_PERMISSION
-OPT_IN_PERMISSION=attach_files  # validated against discord.Permissions at startup
+OPT_IN_PERMISSION=embed_links   # validated against discord.Permissions at startup
 DISCORD_GUILDS=                 # comma-separated guild ids; empty = all
 DISCORD_CHANNELS=               # comma-separated channel ids; empty = all
 EMBED_WAIT_SECONDS=3.0          # how long to let Discord unfurl before judging

@@ -58,7 +58,7 @@ Generate an invite with the **`bot`** scope and these permissions:
 Read Message History is not optional — the bot re-fetches the message to find
 out what Discord managed to embed.
 
-**Do not grant Attach Files here.** That one is granted per channel, and it is
+**Do not grant Embed Links here.** That one is granted per channel, and it is
 what opts a channel in.
 
 ### 4. Configure and start
@@ -76,11 +76,11 @@ token leaves the service disabled. Locally, `make dev-bot`.
 
 ## Opting a channel in
 
-The bot acts only in channels that **explicitly grant it Attach Files** as a
+The bot acts only in channels that **explicitly grant it Embed Links** as a
 channel permission overwrite:
 
 > Channel → **Edit Channel** → **Permissions** → add the bot's role (or the bot
-> itself) → tick **Attach Files** → save.
+> itself) → tick **Embed Links** → save.
 
 Removing that overwrite opts the channel back out. There is no command and no
 stored state: Discord is the record, so it survives restarts and redeploys, and
@@ -92,9 +92,9 @@ physically cannot upload.
 
 What does **not** count as opting in:
 
-- **Role-level Attach Files from the invite.** Base role permissions aren't
+- **Role-level Embed Links from the invite.** Base role permissions aren't
   overwrites. This is why step 3 says to leave it out of the invite.
-- **An `@everyone` overwrite.** `attach_files` is commonly allowed for
+- **An `@everyone` overwrite.** `embed_links` is commonly allowed for
   `@everyone`, and honouring it would opt in every channel on the server at
   once, so it is ignored.
 - **Inheriting from a category.** Only an overwrite on the channel itself (or,
@@ -109,7 +109,7 @@ broken one, so check `logs/bot.log` first:
 
 ```
 INFO  gamtube.bot  my-server: enabled in clips, memes
-WARN  gamtube.bot  other-server: no channel grants attach_files to the bot, so it will do nothing here
+WARN  gamtube.bot  other-server: no channel grants embed_links to the bot, so it will do nothing here
 ```
 
 Set `CHANNEL_OPT_IN=false` to drop the requirement and act anywhere
