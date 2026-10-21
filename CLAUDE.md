@@ -299,11 +299,13 @@ contain the link would be tidier but relies on Discord unfurling an edited
 message, which is not something to bet the whole feature on. A failure says so
 rather than going quiet.
 
-`ACK_MODE=reaction` acknowledges with an emoji on the original message instead
-(default white check mark, red cross on failure). It needs Add Reactions on the
-channel and falls back to a message without it. `ACK_KEEP_REACTION` leaves the
-check in place afterwards, so it reads as "handled" rather than flashing on and
-off - the link message is the real completion signal.
+`ACK_MODE=reaction` is the default: a white check mark on the original message,
+red cross on failure, and `ACK_KEEP_REACTION` leaves the check in place so it
+reads as "handled" rather than flashing on and off - the link message is the
+real completion signal. It needs **Add Reactions** on the channel and falls back
+to posting a message without it, which is quiet enough to be confusing, so
+`on_ready` adds `add_reactions` to the capability check in this mode and warns
+per channel.
 
 **Posting the link is what makes Discord fetch it**, so the player can only
 ever arrive after the message: there is no way to pre-attach it, because **a
@@ -420,7 +422,8 @@ WARMUP_CHANNEL_ID=0             # 0 = the app owner's DM; or a channel id in the
 WARMUP_TIMEOUT_SECONDS=20.0
 WARMUP_SETTLE_SECONDS=3.0
 LINK_NOTE=(clicking this link...)  # appended under the link; empty for none
-ACK_MODE=message                # message | reaction | none while downloading
+ACK_KEEP_REACTION=true          # leave the check on as a handled marker
+ACK_MODE=reaction               # reaction | message | none while downloading
 BOT_DEBUG=false                 # header dumps, stage timings, embed-arrival polling
 HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags
 CRAWLER_USER_AGENTS=            # page gate; empty = bot/agents.py DEFAULT_CRAWLERS

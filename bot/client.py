@@ -24,7 +24,12 @@ import discord
 from bot.config import BotSettings
 from bot.detect import extract_candidates, unembedded
 from bot.handler import rehost
-from bot.scope import allowed_by_ids, missing_capabilities, opted_in
+from bot.scope import (
+    REQUIRED_CAPABILITIES,
+    allowed_by_ids,
+    missing_capabilities,
+    opted_in,
+)
 from bot.store import MemoryStore
 
 log = logging.getLogger("gamtube.bot")
@@ -165,7 +170,12 @@ def build_client(
                 for channel in guild.text_channels:
                     if channel.name not in enabled:
                         continue
-                    gaps = missing_capabilities(guild.me, channel)
+                    required = REQUIRED_CAPABILITIES
+                    if settings.ack_mode == "reaction":
+                        # Only needed in this mode, and its absence is quiet:
+                        # the bot falls back to posting a message instead.
+                        required += ("add_reactions",)
+                    gaps = missing_capabilities(guild.me, channel, required)
                     if gaps:
                         log.warning(
                             "%s: #%s is opted in but the bot lacks %s there; "

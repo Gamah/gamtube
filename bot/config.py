@@ -49,12 +49,12 @@ class BotSettings(BaseSettings):
     # looks like nothing happening. Acknowledge straight away, then replace the
     # note with the link. Posting the link as a NEW message rather than editing
     # the note is deliberate: a fresh message is reliably unfurled.
+    #   reaction - react to the original (default); nothing appears and
+    #              vanishes. Needs Add Reactions on the channel, and falls back
+    #              to message without it, which on_ready warns about.
     #   message  - reply "working on it...", then post the link and delete it
-    #   reaction - react to the original instead; nothing appears and vanishes,
-    #              but needs Add Reactions on the channel and is easy to miss.
-    #              Falls back to message if the permission isn't there.
     #   none     - stay silent until the link is ready
-    ack_mode: Literal["message", "reaction", "none"] = "message"
+    ack_mode: Literal["message", "reaction", "none"] = "reaction"
     # Appended under the link. Viewers see a URL that plays inline but goes
     # nowhere useful if clicked, so say so. Empty for no note.
     link_note: str = "(clicking this link does nothing)"

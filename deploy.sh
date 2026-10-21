@@ -153,7 +153,7 @@ FORCE_MP4="${EX_FORCE_MP4:-true}"
 # Quoted on the way out: the text has spaces, and an unquoted value with a
 # trailing comment marker would confuse systemd.
 LINK_NOTE="${EX_LINK_NOTE:-(clicking this link does nothing)}"
-ACK_MODE="${EX_ACK:-message}"
+ACK_MODE="${EX_ACK:-reaction}"
 ACK_KEEP_REACTION="${EX_ACK_KEEP:-true}"
 WARMUP_ENABLED="${EX_WARMUP_ENABLED:-true}"
 WARMUP_CHANNEL_ID="${EX_WARMUP_CHANNEL:-0}"

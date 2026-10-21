@@ -16,9 +16,9 @@ yt-dlp downloads into.
 ## The lifecycle
 
 1. Someone posts a TikTok link. Discord renders a useless card.
-2. The bot replies **"working on it..."** straight away and shows the typing
-   indicator. Download plus a re-encode can run most of a minute, and silence
-   for that long is indistinguishable from the bot ignoring you.
+2. The bot reacts to the message straight away and shows the typing indicator.
+   Download plus a re-encode can run most of a minute, and silence for that
+   long is indistinguishable from the bot ignoring you.
 3. It downloads the video, normalises it to H.264 mp4 if it isn't already, and
    puts the bytes in `bot/store.py` under `sha256(url)[:12]`.
 4. It replies with the link plus a short note:
@@ -38,9 +38,16 @@ yt-dlp downloads into.
    fresh message is reliably unfurled. On failure the note is edited to say so
    instead of vanishing.
 
-   `ACK_MODE` picks how it acknowledges: `message` (default), `reaction` (an
-   emoji on the original, which leaves nothing behind but needs Add Reactions
-   and falls back to a message without it), or `none`.
+   `ACK_MODE` picks how it acknowledges: `reaction` (default: a white check
+   mark on the original, left in place as a "handled" marker, red cross on
+   failure), `message`, or `none`. Reaction mode needs Add Reactions on the
+   channel and **silently falls back to a message without it** - if you are
+   seeing "working on it..." when you expected a reaction, that is why, and the
+   log says so:
+
+   ```
+   INFO  gamtube.bot  no Add Reactions here; acknowledging with a message instead
+   ```
 
    Before that public post it **warms** the link, which is why the player
    usually arrives with the message rather than filling in a second later. See
@@ -182,6 +189,7 @@ it everything it needs right there:
 | View Channels | see the channel exists at all |
 | Send Messages | post the reply |
 | Read Message History | re-read the message after Discord unfurls it |
+| Add Reactions | the default acknowledgement is a reaction |
 | **Embed Links** | the opt-in marker, and what makes the reply unfurl |
 
 Removing them opts the channel back out. There is no command and no stored
