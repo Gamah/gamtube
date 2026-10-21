@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
+from bot.agents import DEFAULT_CRAWLERS, is_crawler
 from bot.ranges import parse_range
 from bot.scope import allowed_by_ids, opted_in
 from bot.store import Item, MemoryStore
@@ -298,6 +299,28 @@ store = MemoryStore(ttl_seconds=0, max_bytes=1000, now=clock)
 store.put("forever", item(10))
 clock.t += 10_000
 eq("ttl 0 never expires", store.get("forever") is not None, True)
+
+
+# ---- crawler detection (the PAGE gate only; the media proxy is a separate
+# service whose agent we don't assume) ----
+eq("discord unfurler",
+   is_crawler("Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)"), True)
+eq("telegram", is_crawler("TelegramBot (like TwitterBot)"), True)
+eq("slack", is_crawler("Slackbot-LinkExpanding 1.0"), True)
+eq("case insensitive", is_crawler("DISCORDBOT/2.0"), True)
+eq("chrome is a person",
+   is_crawler("Mozilla/5.0 (Macintosh) AppleWebKit/537.36 Chrome/140.0 Safari/537.36"), False)
+eq("safari is a person",
+   is_crawler("Mozilla/5.0 (iPhone; CPU iPhone OS 18_0) Version/18.0 Mobile Safari/604.1"), False)
+eq("curl is a person", is_crawler("curl/8.0"), False)
+eq("missing UA treated as crawler", is_crawler(None), True)
+eq("empty UA treated as crawler", is_crawler(""), True)
+eq("custom list replaces the default",
+   is_crawler("Discordbot/2.0", ("telegrambot",)), False)
+eq("custom list matches its own", is_crawler("TelegramBot", ("telegrambot",)), True)
+ok = "discordbot" in DEFAULT_CRAWLERS
+if not ok:
+    fails.append("DEFAULT_CRAWLERS must contain discordbot")
 
 if fails:
     print(f"FAIL ({len(fails)})")

@@ -5,10 +5,23 @@ read from this process's memory. Nothing here touches the database, the
 storage backend or `videos`; when the item expires the link 404s and that is
 the whole lifecycle.
 
-The two routes are split on purpose: Discord unfurls the **page** to read its
-`og:` tags, then fetches the **media** URL with byte-range requests to build
-the player.
+Three audiences, by user agent:
+
+- a **link crawler** fetching the page gets the `og:` tags, which is the only
+  thing that has to work for an embed to appear;
+- a **person** who opens the link in a browser gets a short notice instead,
+  because the metadata is no use to them and the video isn't meant for them;
+- the **media route** serves bytes with `206` range support to whoever asks,
+  unless `MEDIA_USER_AGENTS` lists who may.
+
+That list is empty by default and is **not** the crawler list. Discord fetches
+the page with its unfurler (`Discordbot`) and the video with its media proxy,
+which is a different service; assuming they look alike would block Discord's
+own fetcher and kill every embed. Every media fetch is logged with its agent
+and address so the list can be filled from evidence.
 """
+
+import logging
 
 from fastapi import APIRouter, Header, Request, Response
 
@@ -17,28 +30,9 @@ from bot.store import Item, MemoryStore
 from web.config import get_settings
 from web.rendering import render
 
+log = logging.getLogger("gamtube.bot")
+
 router = APIRouter(prefix="/d")
-
-
-def _lookup(request: Request, key: str) -> Item | None:
-    store: MemoryStore | None = getattr(request.app.state, "bot_store", None)
-    return store.get(key) if store is not None else None
-
-
-def _blocked(request: Request) -> bool:
-    """Optional user-agent gate.
-
-    `SERVE_USER_AGENTS` is a comma-separated list of substrings; when set, only
-    matching clients get the bytes. It is a heuristic — Discord's proxy
-    identifies itself, but a human clicking the link does not, so leaving this
-    empty (the default) is the safe choice.
-    """
-    allowed = [s.strip().lower() for s in get_settings_bot().serve_user_agents.split(",")]
-    allowed = [s for s in allowed if s]
-    if not allowed:
-        return False
-    ua = (request.headers.get("user-agent") or "").lower()
-    return not any(s in ua for s in allowed)
 
 
 def get_settings_bot():
@@ -48,11 +42,28 @@ def get_settings_bot():
     return get_bot_settings()
 
 
+def _lookup(request: Request, key: str) -> Item | None:
+    store: MemoryStore | None = getattr(request.app.state, "bot_store", None)
+    return store.get(key) if store is not None else None
+
+
+def _is_crawler(request: Request) -> bool:
+    from bot.agents import is_crawler
+
+    return is_crawler(request.headers.get("user-agent"), get_settings_bot().crawlers())
+
+
 @router.get("/{key}")
 def discord_page(key: str, request: Request) -> Response:
     item = _lookup(request, key)
     if item is None:
         return render("link_gone.html", status_code=404)
+
+    settings = get_settings_bot()
+    if settings.human_notice and not _is_crawler(request):
+        # No og: tags here — a person doesn't need them, and the video element
+        # is left out so landing on the link doesn't start a download.
+        return render("discord_human.html", source_url=item.source_url)
 
     base = get_settings().base_url.rstrip("/")
     return render(
@@ -76,7 +87,16 @@ def discord_media(
     item = _lookup(request, key)
     if item is None:
         return Response(status_code=404)
-    if _blocked(request):
+    agent = request.headers.get("user-agent") or "-"
+    client = request.client.host if request.client else "-"
+    # The only record of who actually fetches the video. Until this has been
+    # read on a live instance, MEDIA_USER_AGENTS cannot be set responsibly.
+    log.info("media %s %s range=%s ua=%r from %s",
+             key, request.method, range_header or "-", agent, client)
+
+    allowed = get_settings_bot().media_agents()
+    if allowed and not any(a in agent.lower() for a in allowed):
+        log.info("media %s blocked: ua=%r not in MEDIA_USER_AGENTS", key, agent)
         return Response(status_code=403)
 
     size = item.size

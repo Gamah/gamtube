@@ -173,9 +173,56 @@ With a 300-second TTL the store only ever holds the last few minutes of
 activity, so the steady state sits far below the budget. Eviction is there for
 the pathological case, not the normal one.
 
-`SERVE_USER_AGENTS` optionally restricts who may fetch the bytes to a list of
-user-agent substrings. It is a heuristic — Discord's proxy identifies itself, a
-human clicking the link does not — so the default is empty and serves anyone.
+---
+
+## Who gets what
+
+Discord uses **two separate services** against these links, and the difference
+is the whole design of the gating:
+
+| Fetches | Which service | User agent |
+|---|---|---|
+| `/d/{id}` — the page, for `og:` tags | the unfurler | `Discordbot/...` |
+| `/d/{id}/f` — the video bytes | the media proxy | **not assumed here** |
+
+### The page gate (on by default)
+
+`HUMAN_NOTICE=true` serves a short "this one's for Discord" page, with a link
+to the original, to anything that doesn't look like a link crawler. Only a
+crawler needs the `og:` tags, so there is no downside: embeds keep working and
+a person who clicks the link gets an explanation instead of a bare video.
+
+The crawler list is `bot/agents.py` `DEFAULT_CRAWLERS`, overridable with
+`CRAWLER_USER_AGENTS`. A missing or empty user agent counts as a crawler, so a
+chat app that stops identifying itself doesn't silently lose its embeds.
+
+### The video gate (off by default)
+
+`MEDIA_USER_AGENTS` restricts who may fetch the bytes. **It is deliberately
+not the crawler list.** Discord's media proxy is a different service from its
+unfurler, so putting `discordbot` here would most likely block the fetcher that
+actually retrieves your video and break every embed.
+
+So don't guess it — measure it. Every media fetch is logged:
+
+```
+INFO gamtube.bot  media abc123def456 GET range=bytes=0- ua='...' from 10.0.0.5
+```
+
+Run the bot with the gate empty, post a link, then look at what actually hit
+the media route:
+
+```bash
+grep 'gamtube.bot  media' /opt/gamtube/logs/app.log
+```
+
+That tells you two things at once: what to put in `MEDIA_USER_AGENTS`, and
+whether Discord fetches once or once per viewer — which is the same question
+the TTL rests on. If you see one fetch and nothing more while several people
+watch, Discord cached it.
+
+Neither gate is a security boundary; anything can claim to be Discord. They are
+there to give people a friendlier page and keep casual traffic off the video.
 
 ---
 

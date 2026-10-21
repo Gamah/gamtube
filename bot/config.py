@@ -2,6 +2,7 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings
 
+from bot.agents import DEFAULT_CRAWLERS
 from bot.detect import DEFAULT_DOMAINS
 
 
@@ -46,10 +47,19 @@ class BotSettings(BaseSettings):
     # Cap on uploads from one message, so a link dump can't become a flood.
     max_links_per_message: int = 3
 
-    # Comma-separated user-agent substrings allowed to fetch the bytes; empty
-    # (default) serves anyone. A heuristic: Discord's proxy identifies itself,
-    # a human clicking the link does not.
-    serve_user_agents: str = ""
+    # Who counts as a link crawler; empty = bot.agents.DEFAULT_CRAWLERS.
+    crawler_user_agents: str = ""
+
+    # Show a "this is for Discord" page to people who open /d/ in a browser.
+    # Only crawlers need the og: tags, so this costs nothing.
+    human_notice: bool = True
+
+    # UA substrings allowed to fetch the video bytes; empty (default) serves
+    # anyone. Deliberately NOT crawler_user_agents: the page is fetched by
+    # Discord's unfurler ("Discordbot"), the video by its media proxy, which is
+    # a different service. Populate this from what actually appears in the log
+    # for /d/{key}/f — guessing it blocks Discord and kills every embed.
+    media_user_agents: str = ""
 
     bot_temp_dir: str | None = None
 
@@ -62,6 +72,17 @@ class BotSettings(BaseSettings):
 
     def channel_ids(self) -> set[int]:
         return _int_set(self.discord_channels)
+
+    def crawlers(self) -> tuple[str, ...]:
+        names = tuple(
+            u.strip().lower() for u in self.crawler_user_agents.split(",") if u.strip()
+        )
+        return names or DEFAULT_CRAWLERS
+
+    def media_agents(self) -> tuple[str, ...]:
+        return tuple(
+            u.strip().lower() for u in self.media_user_agents.split(",") if u.strip()
+        )
 
     def domains(self) -> frozenset[str]:
         names = {d.strip().lower().removeprefix("www.") for d in self.watch_domains.split(",")}

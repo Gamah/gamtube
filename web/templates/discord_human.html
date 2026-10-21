@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>nothing to see</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<link rel="icon" type="image/svg+xml" href="/static/awesome_face.svg">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  background: #000; color: #ccc; min-height: 100vh;
+  display: flex; align-items: center; justify-content: center;
+  padding: 1.5rem; font-family: system-ui, sans-serif; line-height: 1.6;
+}
+main { max-width: 27rem; }
+img { width: 44px; height: 44px; display: block; margin-bottom: 1.1rem; }
+h1 { font-size: 1.05rem; font-weight: 600; color: #eee; margin-bottom: .6rem; }
+p { font-size: .88rem; margin-bottom: .7rem; }
+.muted { color: #777; font-size: .8rem; }
+a { color: #adf; text-decoration: none; }
+a:hover { text-decoration: underline; }
+.src { word-break: break-all; }
+</style>
+</head>
+<body>
+<main>
+  <img src="/static/awesome_face.svg" alt="">
+  <h1>Hey &mdash; this one&rsquo;s for Discord.</h1>
+  <p>This link exists so a video plays properly inside a Discord chat. There&rsquo;s
+  nothing here for you to watch, and it stops working in a few minutes.</p>
+  {% if source_url %}
+  <p class="src">Original: <a href="{{ source_url }}" rel="noopener nofollow">{{ source_url }}</a></p>
+  {% endif %}
+  <p class="muted">Want a link that lasts? <a href="/submit">Paste a URL here</a> and
+  you&rsquo;ll get one back.</p>
+</main>
+</body>
+</html>

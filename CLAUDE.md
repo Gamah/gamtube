@@ -262,6 +262,16 @@ with `206` range support, because Discord's media proxy fetches by range.
 decorative — without them Discord sizes the player wrongly or falls back to a
 plain card, which is the failure the bot exists to fix.
 
+**Discord fetches the page and the video with two different services**, and
+conflating them is the trap here. The unfurler reads `/d/{key}` and identifies
+as `Discordbot`, so `bot/agents.py` can safely serve people a notice page
+instead of `og:` tags (`HUMAN_NOTICE`, on by default — only a crawler needs the
+metadata). The media proxy that fetches `/d/{key}/f` is something else, and its
+user agent is **not known here**: gating the bytes on the crawler list would
+block Discord's own fetcher and kill every embed. `MEDIA_USER_AGENTS` is a
+separate list, empty by default, and every media fetch is logged with its agent
+and address so it can be filled from evidence rather than guessed.
+
 **The TTL is a bet.** `LINK_TTL_SECONDS` (300) assumes Discord keeps its own
 copy once it has unfurled a link, so the link may then die. If Discord instead
 proxies every view from the origin, expiry leaves a dead embed in channel
@@ -329,7 +339,9 @@ LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet 
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
-SERVE_USER_AGENTS=              # UA substrings allowed to fetch bytes; empty = anyone
+HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags
+CRAWLER_USER_AGENTS=            # page gate; empty = bot/agents.py DEFAULT_CRAWLERS
+MEDIA_USER_AGENTS=              # video gate; empty = anyone. NOT the crawler list
 MAX_LINKS_PER_MESSAGE=3
 SHRINK_ENABLED=true             # one re-encode attempt when a download is over the cap
 SHRINK_CRF=30
