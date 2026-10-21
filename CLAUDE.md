@@ -280,6 +280,17 @@ TTL and trying to play the embed from another account, and raise the TTL if it
 fails. Attachment upload would sidestep the question entirely but is capped by
 the guild's `filesize_limit`, which is why it isn't the default.
 
+**If the upload path is revisited**, the pieces are: read `guild.filesize_limit`
+(it already accounts for boosts) and feed it to `_format_selector` in place of
+`MAX_ITEM_MB`; send `discord.File(io.BytesIO(item.data), filename=...)` instead
+of the link; and restore `core.titles.safe_filename`, removed in abe8a76, since
+Discord shows the attachment filename above the player and a raw yt-dlp title
+contains slashes, emoji and occasionally hundreds of characters. An upload needs
+no store entry, no `/d/` route, no TTL and no warmup, so it is a shorter path
+than the link one, not a longer one - the cap is its whole cost. Note
+`filesize<?` in the format selector is yt-dlp's own field and unrelated to
+Discord's limit; it keeps us from downloading something we would then reject.
+
 **The reply is two messages, not one edit.** Download plus any re-encode can
 run the better part of a minute, so `ACK_MODE` acknowledges immediately and the
 work happens inside `channel.typing()`. When the link is ready it goes out as a
@@ -519,9 +530,11 @@ knowing:
   `useradd`, `rsync`, `chown`, `sudo` and `python3.12` on `PATH`. That catches
   the config-carry-through and unit-file regressions that are otherwise only
   visible on a live guest.
-- discord.py is pip-installable locally, so API surface (`Guild.filesize_limit`,
-  `Embed.video`, `Intents.message_content`, `Client.run` kwargs) can be checked
-  by introspection instead of from memory.
+- discord.py is pip-installable locally, so API surface (`Embed.video`,
+  `Intents.message_content`, `Thread.overwrites_for`, `Client.run` kwargs,
+  `Permissions.VALID_FLAGS`) can be checked by introspection instead of from
+  memory. Permission integers come from `Permissions(...).value` rather than
+  being written out by hand.
 
 ```bash
 # Submit a video
