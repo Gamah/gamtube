@@ -289,7 +289,7 @@ Since the bot holds no server-wide permissions, a channel is enabled by giving
 it everything it needs right there:
 
 > Channel → **Edit Channel** → **Permissions** → add the bot (or its role) →
-> tick all five → save.
+> tick all six → save.
 
 | Permission | Why |
 |---|---|
@@ -310,6 +310,14 @@ startup log warns about exactly that:
 
 ```
 WARN  gamtube.bot  my-server: #clips is opted in but the bot lacks send_messages there; it will not be able to reply
+```
+
+`Attach Files` is the one exception: without it every clip still works, it just
+goes out as a link with 🔒, so it is said once at startup rather than warned
+about per clip.
+
+```
+INFO  gamtube.bot  my-server: #clips has no Attach Files for the bot, so every clip there goes out as a link
 ```
 
 A channel missing `View Channels` won't appear in the log at all, because the

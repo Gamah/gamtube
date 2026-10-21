@@ -404,7 +404,13 @@ still see most channels. What gates it is that `opted_in` counts neither role
 permissions nor `@everyone` overwrites, so the explicit per-channel grant is
 the only thing that ever enables it. Genuine invisibility needs View Channels
 *denied* to the bot's role at the category level; Discord has no per-bot
-visibility switch. `scope.missing_capabilities()` reports a
+visibility switch. That is an admin procedure, written up in `docs/bot.md`,
+and the bot must never write those overwrites itself - it would need Manage
+Roles or Manage Channels, which is the opposite of the pitch. What the code
+does instead is report it: `scope.unopted_visible()` counts the text channels
+the bot can see but was never opted into, and `client.log_visibility()` warns
+per guild when that count is not zero. Zero is the target; it never refuses to
+start. `scope.missing_capabilities()` reports a
 half-ticked channel at startup, since Embed Links alone looks enabled but
 cannot reply. Moving the first three into the install settings is a supported
 fallback and needs no code change. Threads have no

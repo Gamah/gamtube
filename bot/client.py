@@ -207,6 +207,15 @@ def build_client(
                         # Only needed in this mode, and its absence is quiet:
                         # the bot falls back to posting a message instead.
                         required += ("add_reactions",)
+                    if missing_capabilities(guild.me, channel, ("attach_files",)):
+                        # Not a gap in the required set: without it the upload
+                        # is refused and the link goes out instead, which still
+                        # works. Worth saying once rather than per clip.
+                        log.info(
+                            "%s: #%s has no Attach Files for the bot, "
+                            "so every clip there goes out as a link",
+                            guild.name, channel.name,
+                        )
                     gaps = missing_capabilities(guild.me, channel, required)
                     if gaps:
                         log.warning(

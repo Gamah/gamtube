@@ -523,7 +523,10 @@ async def rehost(
                 return True
             log.info("falling back to a link for %s: %s", url, outcome.value)
         else:
-            outcome = Outcome.OVERSIZE
+            # OVERSIZE means "too big to attach well". With no cap to aim at -
+            # uploads switched off, or not a guild - nothing was measured, so
+            # claiming oversize would be a lie.
+            outcome = Outcome.OVERSIZE if cap else Outcome.FALLBACK
             log.info("falling back to a link for %s: %s", url, prepared.reason)
 
         # The link path, from here on exactly as it was before uploads: the
