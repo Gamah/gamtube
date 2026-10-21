@@ -108,26 +108,25 @@ check "TTL kept"             '^VIDEO_TTL_HOURS=48$'                  "$env_file"
 check "transcode kept"       '^TRANSCODE_ENABLED=true$'              "$env_file"
 check "admin password kept"  '^ADMIN_PASSWORD=sekrit$'               "$env_file"
 
-echo "== bot keys added with defaults, token left empty =="
+echo "== only facts and secrets are pinned; tunables stay in code =="
+# A key in .env overrides the code default forever, so pinning a tunable means
+# later default changes never reach a deployment. Assert they are absent.
+for tunable in ACK_MODE LINK_NOTE WARMUP_CHANNEL_ID BOT_DEBUG HUMAN_NOTICE \
+               MEDIA_USER_AGENTS SHRINK_ENABLED LINK_TTL_SECONDS MAX_ITEM_MB \
+               CHANNEL_OPT_IN OPT_IN_PERMISSION EMBED_WAIT_SECONDS; do
+  if grep -qE "^$tunable=" "$env_file"; then
+    echo " - FAIL $tunable is pinned in .env; it would override the code default"
+    fails=$((fails+1))
+  fi
+done
+for fact in DATABASE_URL MEDIA_ROOT BASE_URL ADMIN_PASSWORD DISCORD_BOT_TOKEN \
+            TRANSCODE_ENABLED VIDEO_TTL_HOURS; do
+  if ! grep -qE "^$fact=" "$env_file"; then
+    echo " - FAIL $fact is missing from .env"; fails=$((fails+1))
+  fi
+done
+
 check "token empty"          '^DISCORD_BOT_TOKEN=$'                  "$env_file"
-check "embed wait default"   '^EMBED_WAIT_SECONDS=3\.0$'             "$env_file"
-check "link ttl default"     '^LINK_TTL_SECONDS=300$'               "$env_file"
-check "item cap default"     '^MAX_ITEM_MB=100$'                    "$env_file"
-check "memory cap default"   '^MAX_MEMORY_MB=512$'                  "$env_file"
-check "force mp4 default"    '^FORCE_MP4=true$'                     "$env_file"
-check "human notice default" '^HUMAN_NOTICE=true$'                  "$env_file"
-check "debug off by default"  '^BOT_DEBUG=false$'                   "$env_file"
-check "ack mode default"     '^ACK_MODE=reaction$'                 "$env_file"
-check "link note default"    '^LINK_NOTE=\(clicking this link does nothing\)$' "$env_file"
-check "warmup off by default" '^WARMUP_CHANNEL_ID=0$'              "$env_file"
-check "warmup settle default" '^WARMUP_SETTLE_SECONDS=3.0$'        "$env_file"
-check "media gate empty"     '^MEDIA_USER_AGENTS=$'                 "$env_file"
-check "max links default"    '^MAX_LINKS_PER_MESSAGE=3$'             "$env_file"
-check "shrink default"       '^SHRINK_ENABLED=true$'                 "$env_file"
-check "shrink crf default"   '^SHRINK_CRF=30$'                       "$env_file"
-check "shrink height"        '^SHRINK_MAX_HEIGHT=720$'               "$env_file"
-check "opt-in on by default" '^CHANNEL_OPT_IN=true$'                 "$env_file"
-check "opt-in permission"    '^OPT_IN_PERMISSION=embed_links$'      "$env_file"
 
 echo "== units =="
 check "web runs web.main"    'uvicorn web\.main:app'       "$ROOT/systemd/gamtube.service"
