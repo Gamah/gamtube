@@ -92,3 +92,32 @@ def missing_capabilities(
         return []
     perms = permissions_for(me)
     return [p for p in required if getattr(perms, p, False) is not True]
+
+
+def can_view(me, channel) -> bool:
+    """Whether the bot effectively sees `channel` at all.
+
+    Effective, like `missing_capabilities`: role, category and overwrite
+    together. An object that cannot answer counts as not visible.
+    """
+    permissions_for = getattr(channel, "permissions_for", None)
+    if permissions_for is None or me is None:
+        return False
+    return getattr(permissions_for(me), "view_channel", False) is True
+
+
+def unopted_visible(me, channels, permission: str) -> list:
+    """The channels the bot can see but was never opted into.
+
+    This is the number that should be zero. Install permissions of nothing
+    still leave a bot inheriting `@everyone`, so it usually sees the whole
+    server and merely declines to act; blindness is View Channels *denied* to
+    its role at the category level and allowed per opted-in channel. The
+    procedure is in `docs/bot.md`, and this is what says whether it took.
+
+    Order is preserved, so the caller can name the first few.
+    """
+    return [
+        c for c in channels
+        if can_view(me, c) and not opted_in(me, c, permission)
+    ]

@@ -12,7 +12,13 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
 from bot.agents import DEFAULT_CRAWLERS, is_crawler
 from bot.ranges import parse_range
-from bot.scope import allowed_by_ids, missing_capabilities, opted_in
+from bot.scope import (
+    allowed_by_ids,
+    can_view,
+    missing_capabilities,
+    opted_in,
+    unopted_visible,
+)
 from bot.store import Item, MemoryStore
 from core.titles import clean_title
 
@@ -365,6 +371,56 @@ eq("custom requirement set",
    missing_capabilities(me, PermChan(Perms(embed_links=True)), ("embed_links",)), [])
 eq("channel without permissions_for", missing_capabilities(me, object()), [])
 eq("no member object", missing_capabilities(None, PermChan(Perms())), [])
+
+
+# ---- can_view / unopted_visible: "how many channels can it see that it was
+# never opted into" is the number the documented blindness procedure drives to
+# zero, so it is what the startup warning counts ----
+class VisChan:
+    """Both halves at once: effective permissions and explicit overwrites."""
+    def __init__(self, name, perms, grants=None):
+        self.name = name
+        self._perms = perms
+        self._grants = grants or {}
+
+    def permissions_for(self, member):
+        return self._perms
+
+    def overwrites_for(self, obj):
+        return self._grants.get(obj, Ov())
+
+
+visible = Perms(view_channel=True)
+hidden = Perms()
+granted = {botrole: Ov(embed_links=True)}
+
+eq("visible channel", can_view(me, VisChan("a", visible)), True)
+eq("denied channel", can_view(me, VisChan("a", hidden)), False)
+eq("can_view without permissions_for", can_view(me, object()), False)
+eq("can_view without member", can_view(None, VisChan("a", visible)), False)
+
+eq("visible and not opted in counts",
+   [c.name for c in unopted_visible(me, [VisChan("general", visible)], "embed_links")],
+   ["general"])
+eq("visible and opted in does not count",
+   unopted_visible(me, [VisChan("clips", visible, granted)], "embed_links"), [])
+eq("invisible and not opted in does not count",
+   unopted_visible(me, [VisChan("secrets", hidden)], "embed_links"), [])
+eq("fully blind guild reports nothing",
+   unopted_visible(me, [VisChan("a", hidden), VisChan("b", hidden)], "embed_links"), [])
+eq("the half-done state: opted in plus leftovers",
+   [c.name for c in unopted_visible(
+       me,
+       [VisChan("clips", visible, granted), VisChan("general", visible),
+        VisChan("staff", hidden), VisChan("random", visible)],
+       "embed_links")],
+   ["general", "random"])
+eq("an @everyone overwrite is not an opt-in here either",
+   [c.name for c in unopted_visible(
+       me, [VisChan("general", visible, {everyone: Ov(embed_links=True)})],
+       "embed_links")],
+   ["general"])
+eq("no channels at all", unopted_visible(me, [], "embed_links"), [])
 
 
 # ---- byte accounting: the bot waits on this before posting the link, so

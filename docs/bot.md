@@ -156,10 +156,9 @@ that `opted_in` ignores both role-level permissions and `@everyone` overwrites:
 only an explicit overwrite naming the bot or its own role counts, and that is
 never there by default.
 
-If you want it genuinely unable to see the rest of the server, **deny** View
-Channels to the bot's role at the category level and allow it on the channels
-you want - Discord has no per-bot visibility switch, so denial has to be an
-overwrite. None of this changes the code.
+If you want it genuinely unable to *see* the rest of the server, that takes
+overwrites: see **Making it blind** below. None of it changes the code, and
+the bot never writes those overwrites itself.
 
 Granting View Channels / Send Messages / Read Message History in the install
 settings instead is the other direction: it makes the bot able to work anywhere
@@ -237,6 +236,80 @@ startup, so a typo is logged and the bot doesn't start rather than silently
 doing nothing.
 
 ---
+
+## Making it blind
+
+Opting in controls what the bot *does*. It does not control what the bot
+*sees*: a bot is a server member and inherits `@everyone`, so on a normal
+server it can read every channel `@everyone` can and simply declines to act.
+If "it cannot see the rest of my server" has to be true rather than merely
+polite, it takes permission overwrites, because Discord has no per-bot
+visibility switch.
+
+**The bot will never do this for you.** Writing its own overwrites needs
+Manage Roles or Manage Channels, and a bot whose whole pitch is that it cannot
+see anything has no business holding either. This is an admin procedure, and
+no code depends on whether you follow it.
+
+Discord gives the bot a managed role of its own, named after the application
+(`gamtube`). Deny View Channels to that role where you don't want it, then
+allow it back on the channels you do.
+
+1. **Category → Edit Category → Permissions → add the `gamtube` role → set
+   View Channels to deny (red X) → save.** Repeat for every category. Channels
+   inherit from their category, so this is one tick per category rather than
+   one per channel.
+2. Channels **outside any category** inherit nothing, so each needs the same
+   deny on the channel itself.
+3. On each channel you want it in, **allow** View Channels to the bot
+   alongside the opt-in ticks from the section above. A channel-level allow
+   beats the category deny.
+
+That is the whole procedure. Order matters only for your own comfort: deny
+first and the bot goes quiet everywhere until you allow it back, allow first
+and nothing is ever interrupted.
+
+### The half-done state
+
+This is the state you will actually be in, because a server has more
+categories than anyone remembers. Some categories are denied, some are not,
+and the bot still sees everything under the ones you missed. Nothing breaks
+and nothing is logged as an error, because the opt-in gate is unaffected: the
+bot still acts only where it is opted in. The *only* symptom is a count, so
+the startup log reports it per guild.
+
+Done:
+
+```
+INFO  gamtube.bot  my-server: enabled in clips, memes
+INFO  gamtube.bot  my-server: blind outside its opted-in channels (0 of 14 text channel(s) visible but not opted in)
+```
+
+Half-done:
+
+```
+INFO  gamtube.bot  my-server: enabled in clips, memes
+WARN  gamtube.bot  my-server: 7 of 14 text channel(s) visible but not opted in (general, random, offtopic, music, art, and 2 more); deny View Channels to the bot's role at the category level to make it blind - see docs/bot.md
+```
+
+The count is the number to drive to zero. It is a warning and never a refusal
+to start: the gate is already correct, so a half-done setup is untidy rather
+than unsafe, and refusing to run would punish whoever is reading the log
+rather than whoever skipped a category.
+
+Two things that read as half-done but aren't:
+
+- **A count that won't go below one or two.** A channel you opted in but where
+  the opt-in marker is absent counts here, so check it isn't the "`#x` is
+  opted in but the bot lacks ..." warning wearing a different hat. Anything
+  listed is either not opted in or not opted in *properly*.
+- **Voice channels and categories.** Only text channels are counted; a voice
+  channel the bot can see cannot carry a link.
+
+A channel it genuinely cannot see appears in no line at all, neither as
+enabled nor as visible, which is what success looks like from the log's point
+of view: silence about most of the server.
+
 
 ## How it decides to act
 

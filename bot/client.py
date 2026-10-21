@@ -29,6 +29,7 @@ from bot.scope import (
     allowed_by_ids,
     missing_capabilities,
     opted_in,
+    unopted_visible,
 )
 from bot.store import MemoryStore
 
@@ -128,6 +129,38 @@ async def _wait_for_embeds(
         await asyncio.sleep(interval)
 
 
+def log_visibility(guild: discord.Guild, settings: BotSettings) -> None:
+    """Say how much of the guild the bot can see but has no business seeing.
+
+    Install permissions of nothing still leave the bot inheriting `@everyone`,
+    so the usual state is "sees everything, acts nowhere". The count below is
+    the number that should be zero once View Channels is denied to the bot's
+    role at the category level; it is a warning and never a refusal to start,
+    because the gate is already correct and the person to punish for a
+    half-done setup is not the one reading the log.
+
+    Text channels only: a voice channel it can see cannot carry a link.
+    """
+    channels = guild.text_channels
+    unopted = unopted_visible(guild.me, channels, settings.opt_in_permission)
+    if not unopted:
+        log.info(
+            "%s: blind outside its opted-in channels (0 of %d text channel(s) "
+            "visible but not opted in)",
+            guild.name, len(channels),
+        )
+        return
+    names = [c.name for c in unopted[:5]]
+    if len(unopted) > len(names):
+        names.append(f"and {len(unopted) - len(names)} more")
+    log.warning(
+        "%s: %d of %d text channel(s) visible but not opted in (%s); deny View "
+        "Channels to the bot's role at the category level to make it blind - "
+        "see docs/bot.md",
+        guild.name, len(unopted), len(channels), ", ".join(names),
+    )
+
+
 def build_client(
     settings: BotSettings, store: MemoryStore, base_url: str
 ) -> discord.Client:
@@ -186,6 +219,7 @@ def build_client(
                     "%s: no channel grants %s to the bot, so it will do nothing here",
                     guild.name, settings.opt_in_permission,
                 )
+            log_visibility(guild, settings)
 
     @client.event
     async def on_message(message: discord.Message) -> None:
