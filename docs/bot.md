@@ -226,6 +226,56 @@ there to give people a friendlier page and keep casual traffic off the video.
 
 ---
 
+## Logging while you tune it
+
+Turn `BOT_DEBUG=true` on for the first while. It adds full request headers on
+both `/d/` routes, per-stage timings, and — instead of one blind sleep — polls
+the message during the wait so the log says when the embed *actually* arrived.
+It costs a few extra Discord API calls per message, so turn it off once the
+numbers stop surprising you.
+
+At `INFO`, without debug, you still get the whole decision trail:
+
+```
+message 1234 in #clips has 1 candidate(s): https://www.tiktok.com/@u/video/1
+after 3.0s discord produced: [type='link' url='https://...' video=None thumb=True title='...']
+1 link(s) need rehosting
+download https://... in 2.4s -> .mp4 3.1MB (extractor=TikTok)
+prepared https://... : 3.1MB 576x1024 14s total 2.5s
+posted https://... as https://tube.4tw.pw/d/abc123def456 (3.1MB, 576x1024, held 300s, 3.0s end to end; store now 1 item(s)/3.1MB)
+page abc123def456 crawler=True ua='Mozilla/5.0 (compatible; Discordbot/2.0...)' from 10.0.0.5
+media abc123def456 GET fetch=1 range=bytes=0- ua='...' from 10.0.0.5
+media abc123def456 serving all 3.1MB
+store evict abc123def456 (ttl) after 1 fetch(es), 3.1MB
+```
+
+Four questions that log answers, in order of how much they matter:
+
+1. **`after Ns discord produced:`** — what Discord actually built. If a TikTok
+   card comes back with `video=None`, the trigger is right; if it has a video
+   URL, the bot shouldn't have acted and `EMBED_WAIT_SECONDS` or the predicate
+   needs a look.
+2. **`media ... fetch=N ua=... from ...`** — who fetches the video, and how
+   often. One fetch while several people watch means Discord cached it; one per
+   viewer means it proxies, and then both the TTL and `MEDIA_USER_AGENTS` need
+   rethinking. This also hands you the UA to put in that list.
+3. **`store evict ... after N fetch(es)`** — whether items die before anyone
+   fetched them (`after 0 fetch(es)` means the TTL is too short, or Discord
+   never came).
+4. **the timings** — `download`, `shrink`, `normalise` and the end-to-end
+   figure, which tell you whether the reply lands while the message is still
+   on screen.
+
+Nothing here is written anywhere but the log, and the log is `app.log`:
+
+```bash
+make bot-logs                                        # live, filtered to the bot
+grep 'gamtube.bot  media' /opt/gamtube/logs/app.log  # just the video fetches
+grep 'discord produced' /opt/gamtube/logs/app.log    # just the embed verdicts
+```
+
+---
+
 ## What it deliberately does not do
 
 - **Remove the original dead embed.** A bot cannot edit someone else's

@@ -322,6 +322,31 @@ ok = "discordbot" in DEFAULT_CRAWLERS
 if not ok:
     fails.append("DEFAULT_CRAWLERS must contain discordbot")
 
+
+# ---- eviction reporting: whether an item died before Discord fetched it is
+# the thing we need to see while tuning the TTL ----
+seen = []
+store = MemoryStore(ttl_seconds=10, max_bytes=250, now=clock,
+                    on_evict=lambda k, i, why: seen.append((k, why, i.fetches)))
+clock.t = 0.0
+store.put("a", item(100))
+store.get("a")
+store.put("b", item(100))
+store.put("c", item(100))
+eq("budget eviction reported", seen, [("a", "budget", 1)])
+
+seen.clear()
+clock.t = 100.0
+store.prune()
+eq("ttl evictions reported", sorted(w for _, w, _ in seen), ["ttl", "ttl"])
+
+# a raising callback must not break eviction
+store = MemoryStore(ttl_seconds=10, max_bytes=100, now=clock,
+                    on_evict=lambda *a: (_ for _ in ()).throw(RuntimeError("boom")))
+store.put("x", item(50))
+clock.t += 1000
+eq("callback failure is contained", store.get("x"), None)
+
 if fails:
     print(f"FAIL ({len(fails)})")
     for f in fails:

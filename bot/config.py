@@ -61,6 +61,12 @@ class BotSettings(BaseSettings):
     # for /d/{key}/f — guessing it blocks Discord and kills every embed.
     media_user_agents: str = ""
 
+    # Verbose instrumentation while the bot is being tuned: full request
+    # headers on /d/, per-stage timings, and polling the message so the actual
+    # embed-arrival delay is measured rather than guessed. Costs extra Discord
+    # API calls, so it is off by default.
+    bot_debug: bool = False
+
     bot_temp_dir: str | None = None
 
     # "extra": "ignore" matters — the bot and the web app share one .env, and

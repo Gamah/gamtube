@@ -53,14 +53,43 @@ def _is_crawler(request: Request) -> bool:
     return is_crawler(request.headers.get("user-agent"), get_settings_bot().crawlers())
 
 
+def _client(request: Request) -> str:
+    """Caller address, preferring what the reverse proxy forwarded."""
+    fwd = request.headers.get("x-forwarded-for")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "-"
+
+
+def _dump_headers(request: Request, label: str) -> None:
+    """Every request header, when BOT_DEBUG is on.
+
+    Worth having while tuning: if Discord's media proxy sends something more
+    reliable than a user agent, this is where it will show up, and a
+    header-based gate beats UA sniffing.
+    """
+    if not get_settings_bot().bot_debug:
+        return
+    for name, value in request.headers.items():
+        log.debug("%s header %s: %s", label, name, value)
+
+
 @router.get("/{key}")
 def discord_page(key: str, request: Request) -> Response:
+    agent = request.headers.get("user-agent") or "-"
+    crawler = _is_crawler(request)
+    log.info("page %s crawler=%s ua=%r from %s",
+             key, crawler, agent, _client(request))
+    _dump_headers(request, f"page {key}")
+
     item = _lookup(request, key)
     if item is None:
+        log.info("page %s 404: not in store", key)
         return render("link_gone.html", status_code=404)
 
     settings = get_settings_bot()
-    if settings.human_notice and not _is_crawler(request):
+    if settings.human_notice and not crawler:
+        log.info("page %s served the human notice", key)
         # No og: tags here — a person doesn't need them, and the video element
         # is left out so landing on the link doesn't start a download.
         return render("discord_human.html", source_url=item.source_url)
@@ -86,13 +115,17 @@ def discord_media(
 ) -> Response:
     item = _lookup(request, key)
     if item is None:
+        log.info("media %s 404: not in store (expired or never held)", key)
         return Response(status_code=404)
     agent = request.headers.get("user-agent") or "-"
-    client = request.client.host if request.client else "-"
     # The only record of who actually fetches the video. Until this has been
-    # read on a live instance, MEDIA_USER_AGENTS cannot be set responsibly.
-    log.info("media %s %s range=%s ua=%r from %s",
-             key, request.method, range_header or "-", agent, client)
+    # read on a live instance, MEDIA_USER_AGENTS cannot be set responsibly, and
+    # fetch=N answers the other open question: one fetch for many viewers means
+    # Discord cached it, one per viewer means it proxies and the TTL matters.
+    log.info("media %s %s fetch=%d range=%s ua=%r from %s",
+             key, request.method, item.fetches, range_header or "-",
+             agent, _client(request))
+    _dump_headers(request, f"media {key}")
 
     allowed = get_settings_bot().media_agents()
     if allowed and not any(a in agent.lower() for a in allowed):
@@ -105,6 +138,8 @@ def discord_media(
     try:
         rng = parse_range(range_header, size)
     except ValueError:
+        log.info("media %s 416: range %r unsatisfiable for %d bytes",
+                 key, range_header, size)
         return Response(
             status_code=416, headers={**common, "Content-Range": f"bytes */{size}"}
         )
@@ -117,9 +152,12 @@ def discord_media(
         )
 
     if rng is None:
+        log.info("media %s serving all %.1fMB", key, size / 1048576)
         return Response(content=item.data, media_type=item.content_type, headers=common)
 
     start, end = rng
+    log.info("media %s serving bytes %d-%d of %d (%.1fMB)",
+             key, start, end, size, (end - start + 1) / 1048576)
     return Response(
         content=item.data[start : end + 1],
         status_code=206,

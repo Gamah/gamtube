@@ -7,10 +7,17 @@ supervised: if the bot fails, it logs and returns, and the web app carries on.
 
 This module imports nothing from `web/` — the dependency runs one way, so the
 bot's logic stays testable without FastAPI.
+
+Logging is deliberately chatty. Until this has run against a real guild the two
+things nobody knows are how long Discord takes to unfurl each platform and what
+it puts in the embed when it fails, so every decision says why it was made.
+`BOT_DEBUG=true` adds per-attempt embed polling, which measures the unfurl
+delay instead of assuming it.
 """
 
 import asyncio
 import logging
+import time
 
 import discord
 
@@ -23,7 +30,9 @@ from bot.store import MemoryStore
 log = logging.getLogger("gamtube.bot")
 
 
-def in_scope(message: discord.Message, settings: BotSettings) -> bool:
+def in_scope(message: discord.Message, settings: BotSettings) -> tuple[bool, str]:
+    """(may act, reason). The reason is for the log — "why did nothing happen"
+    is the question this bot will be asked most often."""
     guild = message.guild
     if not allowed_by_ids(
         guild.id if guild else None,
@@ -31,12 +40,87 @@ def in_scope(message: discord.Message, settings: BotSettings) -> bool:
         settings.guild_ids(),
         settings.channel_ids(),
     ):
-        return False
+        return False, "guild/channel not in DISCORD_GUILDS/DISCORD_CHANNELS"
     if not settings.channel_opt_in:
-        return True
+        return True, "opt-in disabled"
     if guild is None:
-        return False  # a DM carries no overwrites, so it can never opt in
-    return opted_in(guild.me, message.channel, settings.opt_in_permission)
+        return False, "DM, which cannot carry a permission overwrite"
+    if not opted_in(guild.me, message.channel, settings.opt_in_permission):
+        return False, f"channel does not explicitly grant {settings.opt_in_permission}"
+    return True, "opted in"
+
+
+def describe_embeds(message: discord.Message) -> str:
+    """What Discord actually produced, which is the crux of the whole trigger.
+
+    A TikTok or Instagram link usually *does* embed — as a dead link-card — so
+    seeing type/url/video for each embed is what tells you whether the
+    predicate is doing the right thing.
+    """
+    if not message.embeds:
+        return "none"
+    parts = []
+    for e in message.embeds:
+        video = getattr(e, "video", None)
+        video_url = getattr(video, "url", None) if video else None
+        parts.append(
+            f"[type={e.type!r} url={e.url!r} video={video_url!r} "
+            f"thumb={bool(getattr(e, 'thumbnail', None) and e.thumbnail.url)} "
+            f"title={(e.title or '')[:40]!r}]"
+        )
+    return " ".join(parts)
+
+
+async def _wait_for_embeds(
+    message: discord.Message, settings: BotSettings
+) -> discord.Message | None:
+    """Re-read the message once Discord has had time to unfurl it.
+
+    Embeds arrive asynchronously, so the message handed to `on_message` never
+    has them. In debug mode this polls instead of sleeping once, which turns
+    EMBED_WAIT_SECONDS from a guess into a measurement — the log says when the
+    embed actually landed.
+    """
+    started = time.monotonic()
+    wait = settings.embed_wait_seconds
+
+    if not settings.bot_debug:
+        await asyncio.sleep(wait)
+        try:
+            return await message.channel.fetch_message(message.id)
+        except discord.NotFound:
+            log.info("message %s deleted while waiting", message.id)
+            return None
+        except discord.HTTPException:
+            log.exception("could not re-read message %s", message.id)
+            return None
+
+    interval = 0.5
+    fresh = message
+    while True:
+        elapsed = time.monotonic() - started
+        try:
+            fresh = await message.channel.fetch_message(message.id)
+        except discord.NotFound:
+            log.info("message %s deleted while waiting", message.id)
+            return None
+        except discord.HTTPException:
+            log.exception("could not re-read message %s", message.id)
+            return None
+
+        if fresh.embeds:
+            log.debug("embeds appeared after %.2fs: %s", elapsed, describe_embeds(fresh))
+            if elapsed + interval >= wait:
+                return fresh
+            # Keep watching: Discord sometimes upgrades a card to a player.
+        else:
+            log.debug("no embeds yet at %.2fs", elapsed)
+
+        if elapsed + interval >= wait:
+            if not fresh.embeds:
+                log.debug("still no embeds after %.2fs", elapsed)
+            return fresh
+        await asyncio.sleep(interval)
 
 
 def build_client(
@@ -52,6 +136,15 @@ def build_client(
     @client.event
     async def on_ready() -> None:
         log.info("connected as %s in %d guild(s)", client.user, len(client.guilds))
+        log.info(
+            "config: wait=%.1fs opt_in=%s/%s item<=%dMB store<=%dMB ttl=%ds "
+            "force_mp4=%s notice=%s media_gate=%s",
+            settings.embed_wait_seconds, settings.channel_opt_in,
+            settings.opt_in_permission, settings.max_item_mb,
+            settings.max_memory_mb, settings.link_ttl_seconds,
+            settings.force_mp4, settings.human_notice,
+            settings.media_agents() or "open",
+        )
         if not settings.channel_opt_in:
             log.info("channel opt-in disabled; acting wherever the allowlists permit")
             return
@@ -72,27 +165,47 @@ def build_client(
 
     @client.event
     async def on_message(message: discord.Message) -> None:
-        if message.author.bot or not in_scope(message, settings):
+        if message.author.bot:
             return
 
         candidates = extract_candidates(message.content, settings.domains())
+        allowed, reason = in_scope(message, settings)
+
+        if not allowed:
+            # Only interesting when there was something to act on.
+            if candidates:
+                log.info("ignoring %d link(s) in #%s: %s",
+                         len(candidates), getattr(message.channel, "name", "?"), reason)
+            return
         if not candidates:
+            log.debug("no candidate links in message %s", message.id)
             return
 
-        # Discord unfurls after the message arrives, so the copy delivered here
-        # never has embeds yet. Wait, then re-read the message to see what it
-        # actually managed to embed.
-        await asyncio.sleep(settings.embed_wait_seconds)
-        try:
-            fresh = await message.channel.fetch_message(message.id)
-        except discord.NotFound:
-            return  # deleted while we waited
-        except discord.HTTPException:
-            log.exception("could not re-read message %s", message.id)
+        log.info("message %s in #%s has %d candidate(s): %s",
+                 message.id, getattr(message.channel, "name", "?"),
+                 len(candidates), ", ".join(candidates))
+
+        fresh = await _wait_for_embeds(message, settings)
+        if fresh is None:
             return
 
-        todo = unembedded(fresh.embeds, candidates)[: settings.max_links_per_message]
-        for url in todo:
+        log.info("after %.1fs discord produced: %s",
+                 settings.embed_wait_seconds, describe_embeds(fresh))
+
+        todo = unembedded(fresh.embeds, candidates)
+        if not todo:
+            log.info("all %d link(s) already embedded playably; nothing to do",
+                     len(candidates))
+            return
+
+        capped = todo[: settings.max_links_per_message]
+        if len(capped) < len(todo):
+            log.info("%d link(s) need rehosting, handling %d (MAX_LINKS_PER_MESSAGE)",
+                     len(todo), len(capped))
+        else:
+            log.info("%d link(s) need rehosting", len(capped))
+
+        for url in capped:
             await rehost(fresh, url, settings, store, base_url)
 
     return client

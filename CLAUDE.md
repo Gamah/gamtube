@@ -305,6 +305,19 @@ overwrites of their own — discord.py doesn't even give `Thread` an
 `overwrites_for` — so a thread follows its parent. `CHANNEL_OPT_IN=false` drops
 the requirement.
 
+**`gamtube` logging needs `web/logsetup.configure_logging()`.** Uvicorn
+configures its own loggers and never touches the root, so without it an INFO
+record from `gamtube.*` is dropped by `logging.lastResort` at WARNING —
+`isEnabledFor(INFO)` is False and the record isn't even created. It is called
+from `web/main.py` on startup; every bot log line depends on it, and nothing
+else will tell you they're missing.
+
+`BOT_DEBUG=true` is the tuning mode: full request headers on `/d/` (in case
+Discord's media proxy sends something more reliable to gate on than a user
+agent), per-stage timings, and polling the message during the wait so the real
+embed-arrival delay is measured rather than assumed. It costs extra Discord API
+calls, so it is off by default.
+
 `bot/detect.py`, `bot/scope.py`, `bot/store.py`, `bot/ranges.py` and
 `core/titles.py` are **pure and must stay that way** — they are the only parts
 of this feature that can be exercised without a Discord token, and `tests/`
@@ -339,6 +352,7 @@ LINK_TTL_SECONDS=300            # how long a posted link works; see the TTL bet 
 MAX_ITEM_MB=100                 # skip a single video bigger than this (held in RAM)
 MAX_MEMORY_MB=512               # total store budget; oldest evicted first
 FORCE_MP4=true                  # normalise to H.264 mp4 if the download isn't
+BOT_DEBUG=false                 # header dumps, stage timings, embed-arrival polling
 HUMAN_NOTICE=true               # non-crawlers get a notice page instead of og: tags
 CRAWLER_USER_AGENTS=            # page gate; empty = bot/agents.py DEFAULT_CRAWLERS
 MEDIA_USER_AGENTS=              # video gate; empty = anyone. NOT the crawler list

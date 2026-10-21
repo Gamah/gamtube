@@ -11,6 +11,7 @@ import asyncio
 import logging
 import shutil
 import tempfile
+import time
 from pathlib import Path
 
 import discord
@@ -65,21 +66,37 @@ def _dimensions(path: Path) -> tuple[int | None, int | None, int | None]:
 
 
 def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
-    """Blocking half: download, normalise, measure. Runs in a worker thread."""
+    """Blocking half: download, normalise, measure. Runs in a worker thread.
+
+    Each stage is timed and logged: the open question is whether download plus
+    normalisation fits inside the window before someone scrolls past, and
+    that only shows up as numbers from a real guild.
+    """
     cap = settings.max_item_mb * 1024 * 1024
+    t0 = time.monotonic()
     info, src, _ = download(
         url, tmp, None, fmt=_format_selector(cap), writethumbnail=False
     )
     size = src.stat().st_size
+    log.info("download %s in %.1fs -> %s %.1fMB (extractor=%s)",
+             url, time.monotonic() - t0, src.suffix, size / 1048576,
+             info.get("extractor_key") or info.get("extractor"))
 
     if size > cap and settings.shrink_enabled:
         shrunk = tmp / "shrunk.mp4"
         log.info("%s is %.1fMB, over the %dMB item cap; shrinking",
                  url, size / 1048576, settings.max_item_mb)
+        t1 = time.monotonic()
         transcode(src, shrunk, None,
                   crf=settings.shrink_crf, max_height=settings.shrink_max_height)
         if shrunk.exists() and shrunk.stat().st_size < size:
+            log.info("shrink %s in %.1fs: %.1fMB -> %.1fMB",
+                     url, time.monotonic() - t1, size / 1048576,
+                     shrunk.stat().st_size / 1048576)
             src, size = shrunk, shrunk.stat().st_size
+        else:
+            log.info("shrink %s in %.1fs made it no smaller; keeping the original",
+                     url, time.monotonic() - t1)
 
     if size > cap:
         log.info("skip %s — %.1fMB still over the %dMB item cap",
@@ -91,14 +108,24 @@ def _prepare(url: str, tmp: Path, settings: BotSettings) -> Item | None:
         # container it plays everywhere, iOS included.
         mp4 = tmp / "forced.mp4"
         log.info("%s arrived as %s; normalising to mp4", url, src.suffix)
+        t2 = time.monotonic()
         transcode(src, mp4, None)
         src = mp4
         size = src.stat().st_size
+        log.info("normalise %s in %.1fs -> %.1fMB",
+                 url, time.monotonic() - t2, size / 1048576)
         if size > cap:
             log.info("skip %s — %.1fMB after mp4 normalisation", url, size / 1048576)
             return None
 
     width, height, duration = _dimensions(src)
+    if width is None or height is None:
+        # og:video:width/height drive the player size; missing them is the
+        # likeliest cause of an embed that renders as a plain card.
+        log.warning("%s has no probe dimensions; the embed may degrade", url)
+    log.info("prepared %s: %.1fMB %sx%s %ss total %.1fs",
+             url, size / 1048576, width, height, duration,
+             time.monotonic() - t0)
     return Item(
         data=src.read_bytes(),
         content_type="video/mp4" if src.suffix.lower() == ".mp4" else "video/webm",
@@ -125,6 +152,7 @@ async def rehost(
         return False
     _inflight.add(guard)
 
+    started = time.monotonic()
     tmp = Path(tempfile.mkdtemp(dir=settings.bot_temp_dir or None))
     try:
         item = await asyncio.to_thread(_prepare, url, tmp, settings)
@@ -134,9 +162,11 @@ async def rehost(
         store.put(key, item)
         link = f"{base_url.rstrip('/')}/d/{key}"
         await message.reply(link, mention_author=False)
-        log.info("posted %s as %s (%.1fMB, %sx%s, held %ds)",
+        log.info("posted %s as %s (%.1fMB, %sx%s, held %ds, %.1fs end to end; "
+                 "store now %d item(s)/%.1fMB)",
                  url, link, item.size / 1048576, item.width, item.height,
-                 settings.link_ttl_seconds)
+                 settings.link_ttl_seconds, time.monotonic() - started,
+                 len(store), store.total_bytes() / 1048576)
         return True
 
     except Exception:

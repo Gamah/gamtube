@@ -43,10 +43,16 @@ class MemoryStore:
         ttl_seconds: float,
         max_bytes: int,
         now: Callable[[], float] = time.monotonic,
+        on_evict: Callable[[str, "Item", str], None] | None = None,
     ) -> None:
         self._ttl = ttl_seconds
         self._max = max_bytes
         self._now = now
+        # Called with (key, item, "ttl" | "budget"). A callback rather than a
+        # logger so the store stays dependency-free and testable; whether an
+        # item was dropped before Discord fetched it is exactly what we need to
+        # know while tuning the TTL.
+        self._on_evict = on_evict
         self._lock = threading.Lock()
         # Insertion-ordered, so the oldest live item is always the first key.
         self._items: dict[str, Item] = {}
@@ -58,7 +64,8 @@ class MemoryStore:
             self._items[key] = item
             self._prune_locked()
             while self._items and self._total_locked() > self._max:
-                self._items.pop(next(iter(self._items)))
+                victim = next(iter(self._items))
+                self._notify(victim, self._items.pop(victim), "budget")
 
     def get(self, key: str) -> Item | None:
         with self._lock:
@@ -86,6 +93,14 @@ class MemoryStore:
 
     # --- internals; caller holds the lock ---
 
+    def _notify(self, key: str, item: "Item", reason: str) -> None:
+        if self._on_evict is None:
+            return
+        try:
+            self._on_evict(key, item, reason)
+        except Exception:
+            pass  # never let instrumentation break eviction
+
     def _total_locked(self) -> int:
         return sum(i.size for i in self._items.values())
 
@@ -95,5 +110,5 @@ class MemoryStore:
         cutoff = self._now() - self._ttl
         dead = [k for k, i in self._items.items() if i.created <= cutoff]
         for k in dead:
-            del self._items[k]
+            self._notify(k, self._items.pop(k), "ttl")
         return len(dead)

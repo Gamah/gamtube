@@ -63,8 +63,9 @@ client = TestClient(app)
 class FakeSettings:
     """Stands in for BotSettings so each gate can be exercised."""
 
-    def __init__(self, human_notice=True, media_user_agents=()):
+    def __init__(self, human_notice=True, media_user_agents=(), bot_debug=False):
         self.human_notice = human_notice
+        self.bot_debug = bot_debug
         self._media = media_user_agents
 
     def crawlers(self):
@@ -189,11 +190,35 @@ try:
     bare = FastAPI()
     bare.state.bot_store = None
     bare.include_router(ephemeral.router)
+    # debug header dumping must not change any response
+    settings(bot_debug=True)
+    eq("debug page still 200", crawl("/d/abc123").status_code, 200)
+    eq("debug media still 200", crawl("/d/abc123/f").status_code, 200)
+    eq("debug range still 206",
+       crawl("/d/abc123/f", headers={"Range": "bytes=0-9"}).status_code, 206)
+    settings()
+
     eq("no store configured 404s",
        TestClient(bare).get("/d/abc123", headers={"User-Agent": CRAWLER_UA}).status_code,
        404)
 finally:
     ephemeral.get_settings_bot = _real
+
+# ---- the logger must actually be able to emit INFO ----
+# Uvicorn leaves the root logger alone, so without web.main._configure_logging
+# every gamtube.bot INFO record is dropped by logging.lastResort at WARNING.
+import logging  # noqa: E402
+
+from web.logsetup import configure_logging  # noqa: E402
+
+bot_log = logging.getLogger("gamtube.bot")
+eq("INFO is dropped before configuring", bot_log.isEnabledFor(logging.INFO), False)
+configure_logging(debug=False)
+eq("INFO emits after configuring", bot_log.isEnabledFor(logging.INFO), True)
+eq("DEBUG stays off at info level", bot_log.isEnabledFor(logging.DEBUG), False)
+configure_logging(debug=True)
+eq("debug=True raises the level", bot_log.isEnabledFor(logging.DEBUG), True)
+eq("repeat calls add no handlers", len(logging.getLogger("gamtube").handlers), 1)
 
 if fails:
     print(f"FAIL ({len(fails)})")
