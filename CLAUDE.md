@@ -51,10 +51,14 @@ gamtube/
 │   ├── __main__.py          # `python -m bot`: client, on_message, embed re-check, dispatch
 │   ├── config.py            # BotSettings (pydantic-settings), guild/channel/domain parsing
 │   ├── detect.py            # PURE: extract_candidates, is_candidate, norm_url, unembedded
+│   ├── scope.py             # PURE: allowed_by_ids, opted_in — channel opt-in via permissions
 │   └── handler.py           # rehost(): download → size check → shrink → attachment reply
 ├── docs/
 │   ├── web.md               # routes, processing, expiry, storage
 │   └── bot.md               # why attachments, Discord app setup, intents, tuning
+├── tests/
+│   ├── test_pure.py         # link detection, opt-in predicates, titles/filenames
+│   └── test_deploy.sh       # deploy.sh end to end against stubbed system commands
 ├── static/                  # style.css, awesome_face.svg
 ├── media/                   # default MEDIA_ROOT (gitignored)
 ├── logs/                    # app.log + bot.log written by the systemd services (gitignored)
@@ -254,7 +258,18 @@ re-hosted.
 Links wrapped as `<https://...>` are skipped on purpose: that syntax is how a
 Discord user suppresses an embed, so overriding it would be rude.
 
-`bot/detect.py` and `core/titles.py` are **pure and must stay that way** — they
+**Per-channel opt-in is Discord's permission system, not bot state**
+(`bot/scope.py`). A channel is enabled when it carries an *explicit* permission
+overwrite granting the bot `OPT_IN_PERMISSION` (default `attach_files`).
+Discord stores it, so it survives restarts with no file, DB or command to sync.
+Three things deliberately don't count: base role permissions from the invite
+(not overwrites — which is why `docs/bot.md` tells you to leave Attach Files
+out of the invite), an `@everyone` overwrite (it would enable every channel at
+once), and category inheritance. Threads have no overwrites of their own —
+discord.py doesn't even give `Thread` an `overwrites_for` — so a thread follows
+its parent. `CHANNEL_OPT_IN=false` drops the requirement.
+
+`bot/detect.py`, `bot/scope.py` and `core/titles.py` are **pure and must stay that way** — they
 are the only parts of the bot that can be exercised on a machine with no
 Discord token, and there is a harness that does so.
 
@@ -277,6 +292,8 @@ TRANSCODE_ENABLED=false         # re-encode to H.264 MP4 on ingest; false = serv
 ADMIN_PASSWORD=                 # password for /manage panel; leave empty to disable
 # bot (ignored by the web app; the web app's keys are ignored by the bot):
 DISCORD_BOT_TOKEN=              # empty = bot service stays disabled
+CHANNEL_OPT_IN=true             # channel must explicitly grant OPT_IN_PERMISSION
+OPT_IN_PERMISSION=attach_files  # validated against discord.Permissions at startup
 DISCORD_GUILDS=                 # comma-separated guild ids; empty = all
 DISCORD_CHANNELS=               # comma-separated channel ids; empty = all
 EMBED_WAIT_SECONDS=3.0          # how long to let Discord unfurl before judging

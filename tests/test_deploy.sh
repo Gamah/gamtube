@@ -70,6 +70,8 @@ check "max links default"    '^MAX_LINKS_PER_MESSAGE=3$'             "$env_file"
 check "shrink default"       '^SHRINK_ENABLED=true$'                 "$env_file"
 check "shrink crf default"   '^SHRINK_CRF=30$'                       "$env_file"
 check "shrink height"        '^SHRINK_MAX_HEIGHT=720$'               "$env_file"
+check "opt-in on by default" '^CHANNEL_OPT_IN=true$'                 "$env_file"
+check "opt-in permission"    '^OPT_IN_PERMISSION=attach_files$'      "$env_file"
 
 echo "== units =="
 check "web runs web.main"    'uvicorn web\.main:app'       "$ROOT/systemd/gamtube.service"

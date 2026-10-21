@@ -10,6 +10,7 @@ import sys
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
+from bot.scope import allowed_by_ids, opted_in
 from core.titles import clean_title, safe_filename
 
 fails = []
@@ -122,6 +123,88 @@ eq("length capped", len(safe_filename("x" * 300, ".mp4")), 84)
 eq("cap does not leave trailing space",
    safe_filename("y" * 79 + " zzz", ".mp4"), "y" * 79 + ".mp4")
 eq("quotes and pipes", safe_filename('a"b|c<d>e:f*g?h', ".mp4"), "a b c d e f g h.mp4")
+
+
+# ---- scope: the coarse allowlists ----
+eq("no allowlists allows all", allowed_by_ids(1, 2, set(), set()), True)
+eq("guild allowlist hit", allowed_by_ids(1, 2, {1}, set()), True)
+eq("guild allowlist miss", allowed_by_ids(9, 2, {1}, set()), False)
+eq("channel allowlist hit", allowed_by_ids(1, 2, set(), {2}), True)
+eq("channel allowlist miss", allowed_by_ids(1, 9, set(), {2}), False)
+eq("dm rejected when guilds listed", allowed_by_ids(None, 2, {1}, set()), False)
+eq("dm allowed with no allowlist", allowed_by_ids(None, 2, set(), set()), True)
+eq("both must pass", allowed_by_ids(1, 9, {1}, {2}), False)
+
+
+# ---- scope: opt-in by explicit permission overwrite ----
+class Ov:
+    """Stand-in for PermissionOverwrite: unset permissions read as None."""
+    def __init__(self, **kw):
+        self.__dict__.update(kw)
+
+    def __getattr__(self, name):
+        return None
+
+
+class Role:
+    def __init__(self, name):
+        self.name = name
+
+
+class Guild:
+    def __init__(self, default_role):
+        self.default_role = default_role
+
+
+class Me:
+    def __init__(self, roles, guild):
+        self.roles = roles
+        self.guild = guild
+
+
+class Chan:
+    def __init__(self, grants=None):
+        self._grants = grants or {}
+
+    def overwrites_for(self, obj):
+        return self._grants.get(obj, Ov())
+
+
+class Thread:
+    def __init__(self, parent):
+        self.parent = parent
+
+
+everyone = Role("@everyone")
+botrole = Role("gamtube")
+guild = Guild(everyone)
+me = Me([everyone, botrole], guild)
+
+eq("explicit member grant",
+   opted_in(me, Chan({me: Ov(attach_files=True)}), "attach_files"), True)
+eq("explicit bot-role grant",
+   opted_in(me, Chan({botrole: Ov(attach_files=True)}), "attach_files"), True)
+eq("@everyone grant does not opt in",
+   opted_in(me, Chan({everyone: Ov(attach_files=True)}), "attach_files"), False)
+eq("no overwrites at all",
+   opted_in(me, Chan(), "attach_files"), False)
+eq("explicit deny is not a grant",
+   opted_in(me, Chan({botrole: Ov(attach_files=False)}), "attach_files"), False)
+eq("a different permission does not count",
+   opted_in(me, Chan({botrole: Ov(send_messages=True)}), "attach_files"), False)
+eq("configurable permission name",
+   opted_in(me, Chan({botrole: Ov(send_messages=True)}), "send_messages"), True)
+eq("thread inherits its parent's grant",
+   opted_in(me, Thread(Chan({botrole: Ov(attach_files=True)})), "attach_files"), True)
+eq("thread with no parent grant",
+   opted_in(me, Thread(Chan()), "attach_files"), False)
+eq("missing member object",
+   opted_in(None, Chan({botrole: Ov(attach_files=True)}), "attach_files"), False)
+eq("channel without overwrites_for",
+   opted_in(me, object(), "attach_files"), False)
+eq("guild with no default_role still checks roles",
+   opted_in(Me([botrole], Guild(None)), Chan({botrole: Ov(attach_files=True)}),
+            "attach_files"), True)
 
 if fails:
     print(f"FAIL ({len(fails)})")

@@ -53,11 +53,13 @@ Generate an invite with the **`bot`** scope and these permissions:
 |---|---|
 | View Channels | see the message |
 | Send Messages | post the reply |
-| Attach Files | the actual payload |
 | Read Message History | re-read the message after Discord unfurls it |
 
 Read Message History is not optional — the bot re-fetches the message to find
 out what Discord managed to embed.
+
+**Do not grant Attach Files here.** That one is granted per channel, and it is
+what opts a channel in.
 
 ### 4. Configure and start
 
@@ -72,9 +74,54 @@ token leaves the service disabled. Locally, `make dev-bot`.
 
 ---
 
+## Opting a channel in
+
+The bot acts only in channels that **explicitly grant it Attach Files** as a
+channel permission overwrite:
+
+> Channel → **Edit Channel** → **Permissions** → add the bot's role (or the bot
+> itself) → tick **Attach Files** → save.
+
+Removing that overwrite opts the channel back out. There is no command and no
+stored state: Discord is the record, so it survives restarts and redeploys, and
+there is nothing to keep in sync.
+
+This is deliberately the same permission the bot needs to do its job, so the
+two can't disagree — a channel where it isn't opted in is a channel where it
+physically cannot upload.
+
+What does **not** count as opting in:
+
+- **Role-level Attach Files from the invite.** Base role permissions aren't
+  overwrites. This is why step 3 says to leave it out of the invite.
+- **An `@everyone` overwrite.** `attach_files` is commonly allowed for
+  `@everyone`, and honouring it would opt in every channel on the server at
+  once, so it is ignored.
+- **Inheriting from a category.** Only an overwrite on the channel itself (or,
+  for a thread, on its parent channel) counts.
+
+Threads have no permissions of their own, so a thread follows its parent
+channel.
+
+On connect the bot logs which channels are enabled in each guild, and warns
+when a guild has none — an opt-in bot with nothing granted looks identical to a
+broken one, so check `logs/bot.log` first:
+
+```
+INFO  gamtube.bot  my-server: enabled in clips, memes
+WARN  gamtube.bot  other-server: no channel grants attach_files to the bot, so it will do nothing here
+```
+
+Set `CHANNEL_OPT_IN=false` to drop the requirement and act anywhere
+`DISCORD_GUILDS` / `DISCORD_CHANNELS` permit. `OPT_IN_PERMISSION` changes which
+permission is the marker; it is validated against Discord's permission names at
+startup, so a typo fails loudly instead of silently disabling the bot.
+
+---
+
 ## How it decides to act
 
-1. A message arrives. Links are matched against `WATCH_DOMAINS` (default list
+1. A message arrives in an opted-in channel. Links are matched against `WATCH_DOMAINS` (default list
    in `bot/detect.py`) — a cheap prefilter so unrelated links never cost a
    yt-dlp call.
 2. Links wrapped as `<https://...>` are skipped. That syntax is how a user
@@ -103,9 +150,10 @@ platform. Too short and links that *would* have embedded get re-hosted
 anyway; too long and the reply feels detached from the message. Watch
 `logs/bot.log` on a real guild and adjust.
 
-`DISCORD_GUILDS` and `DISCORD_CHANNELS` restrict where it acts. Both empty
-means every guild it was invited to and every channel it can read, which is
-rarely what you want on a large server.
+`DISCORD_GUILDS` and `DISCORD_CHANNELS` are a coarser filter applied before
+the opt-in check — useful for keeping a bot that is in several servers working
+in only one of them. With `CHANNEL_OPT_IN=true` they are usually unnecessary,
+since a channel that grants nothing is already excluded.
 
 ---
 

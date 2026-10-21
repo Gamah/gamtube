@@ -8,8 +8,13 @@ from bot.detect import DEFAULT_DOMAINS
 class BotSettings(BaseSettings):
     discord_bot_token: str = ""
 
-    # Comma-separated guild ids the bot will act in; empty = every guild it has
-    # been invited to. Channel ids in discord_channels narrow it further.
+    # Opt-in is a Discord permission overwrite, not bot state: a channel counts
+    # as enabled when it explicitly grants the bot opt_in_permission. Set
+    # channel_opt_in=false to act everywhere the allowlists below permit.
+    channel_opt_in: bool = True
+    opt_in_permission: str = "attach_files"
+
+    # Coarse allowlists applied before the opt-in check; empty = no limit.
     discord_guilds: str = ""
     discord_channels: str = ""
 
