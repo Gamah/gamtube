@@ -59,6 +59,16 @@ check() { # check <label> <pattern> <file>
   if grep -qE -- "$2" "$3"; then :; else echo " - FAIL $1 (no match for: $2)"; fails=$((fails+1)); fi
 }
 
+echo "== rsync keeps runtime state =="
+# rsync is stubbed in this sandbox, so assert on the command itself: --delete
+# plus a missing exclude silently destroys logs or config on every deploy.
+for runtime in logs .env media '*.db' .venv; do
+  if ! grep -qF -- "--exclude='$runtime'" "$ROOT/deploy.sh"; then
+    echo " - FAIL rsync does not exclude $runtime, so --delete would remove it"
+    fails=$((fails+1))
+  fi
+done
+
 echo "== masked secret input =="
 # Extract _read_secret and drive it from a pipe: read -rsn1 works on a
 # non-tty, so the assembly and backspace handling are testable without a pty.

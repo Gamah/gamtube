@@ -272,10 +272,16 @@ MEDIA_DIR="$DATA_DIR/media"
 
 echo "==> Copying application to $DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR"
+# --delete removes anything in the destination that isn't in the checkout, so
+# every runtime path has to be excluded explicitly. logs/ and .env are the ones
+# that hurt: without them a deploy silently destroys the log history you were
+# about to read, and briefly removes the config the service needs.
 rsync -a --delete \
   --exclude='.git' \
   --exclude='.venv' \
   --exclude='media' \
+  --exclude='logs' \
+  --exclude='.env' \
   --exclude='*.db' \
   --exclude='__pycache__' \
   --exclude='*.pyc' \
