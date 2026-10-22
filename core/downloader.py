@@ -1,7 +1,12 @@
+import logging
 from collections.abc import Callable
 from pathlib import Path
 
 import yt_dlp
+
+from core.urls import for_extractor
+
+log = logging.getLogger("gamtube.downloader")
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".webp", ".png"}
 
@@ -19,7 +24,16 @@ def download(
     `fmt` is a yt-dlp format selector; the bot narrows it to stay under
     Discord's attachment cap. `writethumbnail` is off for callers that have
     nowhere to put a thumbnail.
+
+    The URL is put into the shape yt-dlp's extractors match first - see
+    `core.urls.for_extractor` - because a bare `tiktok.com/...` otherwise
+    reaches the generic extractor and dies with UnsupportedError.
     """
+    wanted = for_extractor(url)
+    if wanted != url:
+        log.info("rewrote %s to %s for the extractor", url, wanted)
+        url = wanted
+
     def hook(d: dict) -> None:
         if on_progress is None:
             return

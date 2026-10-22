@@ -24,6 +24,7 @@ Submissions are public; anyone who can reach the server can submit a URL. Viewin
 gamtube/
 ├── core/                    # SHARED. no web, no Discord, no DB - stdlib + yt-dlp + ffmpeg
 │   ├── ids.py               # SHA-256(source_url)[:12] short ID derivation
+│   ├── urls.py              # PURE: for_extractor() - URL shapes yt-dlp won't accept
 │   ├── titles.py            # PURE: clean_title() og:title noise, safe_filename() attachments
 │   ├── mp4.py               # PURE: top-level box walk + compat_verdict (ok/remux/reencode)
 │   ├── downloader.py        # yt-dlp wrapper → info dict + video path + thumbnail path
@@ -412,6 +413,18 @@ embeds" - TikTok and Instagram normally do produce an embed, just a dead
 link-card. It is evaluated per link (`bot/detect.unembedded`), because a
 message holding both a YouTube link and a TikTok link must still get the TikTok
 re-hosted.
+
+**A bare `tiktok.com/...` is not a TikTok URL as far as yt-dlp is concerned.**
+Its extractor's `_VALID_URL` only matches the `www.` form, so the bare domain
+- which Discord linkifies happily and a phone share sheet sometimes produces -
+falls through to the generic extractor and raises `UnsupportedError`, which
+the bot reports as an outright failure. `core.urls.for_extractor()` adds the
+prefix inside `core/downloader.download()`, so both front ends are covered
+from one place, and it only ever touches hosts in its list: `www.` would break
+`vm.tiktok.com` or `fb.watch`. Checked against yt-dlp 2026.10.21 - the
+constraint is read off `_VALID_URL`, not documented, so re-check it rather
+than trusting this line. Note the short id is still derived from the URL as
+submitted, so the bare and `www.` forms remain two rows in `videos`.
 
 **Discord does not echo back the link it unfurled - it canonicalises it**, so
 the embed for `youtu.be/XYZ` arrives as `youtube.com/watch?v=XYZ`. Comparing

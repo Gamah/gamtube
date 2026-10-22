@@ -28,6 +28,7 @@ from bot.store import Item, MemoryStore
 from bot.upload import affordable_kbps, plan
 from core.mp4 import compat_verdict, moov_before_mdat, top_level_boxes
 from core.titles import clean_title, safe_filename
+from core.urls import for_extractor
 
 fails = []
 
@@ -178,6 +179,29 @@ eq("length capped", len(safe_filename("x" * 300, ".mp4")), 84)
 eq("cap does not leave trailing space",
    safe_filename("y" * 79 + " zzz", ".mp4"), "y" * 79 + ".mp4")
 eq("quotes and pipes", safe_filename('a"b|c<d>e:f*g?h', ".mp4"), "a b c d e f g h.mp4")
+
+# ---- for_extractor: yt-dlp's tiktok extractor only matches the www form, and
+# Discord linkifies the bare domain happily ----
+eq("bare tiktok gains www",
+   for_extractor("https://tiktok.com/@u/video/123"),
+   "https://www.tiktok.com/@u/video/123")
+eq("www tiktok is left alone",
+   for_extractor("https://www.tiktok.com/@u/video/123"),
+   "https://www.tiktok.com/@u/video/123")
+eq("scheme and query survive",
+   for_extractor("http://tiktok.com/@u/video/123?is_from=1"),
+   "http://www.tiktok.com/@u/video/123?is_from=1")
+eq("a short-link host must not gain www",
+   for_extractor("https://vm.tiktok.com/ZMabc/"), "https://vm.tiktok.com/ZMabc/")
+eq("a host that does not need it is untouched",
+   for_extractor("https://instagram.com/reel/x/"), "https://instagram.com/reel/x/")
+eq("port is preserved",
+   for_extractor("https://tiktok.com:8443/@u/video/1"),
+   "https://www.tiktok.com:8443/@u/video/1")
+eq("uppercase host still matches",
+   for_extractor("https://TikTok.com/@u/video/1"),
+   "https://www.tiktok.com/@u/video/1")
+
 
 # ---- scope: the coarse allowlists ----
 eq("no allowlists allows all", allowed_by_ids(1, 2, set(), set()), True)
