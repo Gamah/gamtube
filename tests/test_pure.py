@@ -9,7 +9,13 @@ import sys
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
-from bot.detect import extract_candidates, is_candidate, norm_url, unembedded
+from bot.detect import (
+    extract_candidates,
+    identity,
+    is_candidate,
+    norm_url,
+    unembedded,
+)
 from bot.agents import DEFAULT_CRAWLERS, is_crawler
 from bot.ranges import parse_range
 from bot.scope import (
@@ -108,6 +114,45 @@ eq("embed without video does not count",
 
 eq("no embeds at all",
    unembedded([], ["https://x.com/a/1"]), ["https://x.com/a/1"])
+
+# Discord canonicalises the link it unfurled, so the embed never comes back
+# spelled the way it was posted. Matching on host+path alone re-hosted an
+# already playable YouTube video; matching on the id survives it.
+eq("short link against its canonical embed",
+   unembedded([E("https://www.youtube.com/watch?v=RY9u0LxIWJk")],
+              ["https://youtu.be/RY9u0LxIWJk"]),
+   [])
+eq("canonical link against a short embed",
+   unembedded([E("https://youtu.be/RY9u0LxIWJk")],
+              ["https://www.youtube.com/watch?v=RY9u0LxIWJk"]),
+   [])
+eq("tracking parameters do not break it",
+   unembedded([E("https://www.youtube.com/watch?v=RY9u0LxIWJk")],
+              ["https://youtu.be/RY9u0LxIWJk?si=abc123&t=42"]),
+   [])
+eq("shorts against the watch form",
+   unembedded([E("https://www.youtube.com/watch?v=abcdefghijk")],
+              ["https://www.youtube.com/shorts/abcdefghijk"]),
+   [])
+eq("a different video is still re-hosted",
+   unembedded([E("https://www.youtube.com/watch?v=RY9u0LxIWJk")],
+              ["https://youtu.be/ZZZZZZZZZZZ"]),
+   ["https://youtu.be/ZZZZZZZZZZZ"])
+
+eq("identity carries host+path and the id",
+   sorted(identity("https://youtu.be/RY9u0LxIWJk")),
+   ["ry9u0lxiwjk", "youtu.be/ry9u0lxiwjk"])
+eq("the v parameter counts as an id",
+   "ry9u0lxiwjk" in identity("https://www.youtube.com/watch?v=RY9u0LxIWJk"), True)
+eq("a route segment is not an id",
+   identity("https://www.youtube.com/watch"), {"youtube.com/watch"})
+eq("a short segment is not an id",
+   identity("https://x.com/a/1"), {"x.com/a/1"})
+eq("tiktok's numeric id is one",
+   "7650731445366885646" in identity(
+       "https://www.tiktok.com/@user/video/7650731445366885646"), True)
+eq("a reel id survives the route segment",
+   "dxyzabc123" in identity("https://www.instagram.com/reel/DxyzAbc123/"), True)
 
 # ---- clean_title ----
 eq("facebook noise", clean_title("1.2K views · 34 reactions · Actual Title"), "Actual Title")

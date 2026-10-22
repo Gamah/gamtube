@@ -343,7 +343,11 @@ WARN  gamtube.bot  my-server: the bot will reply in none of its 12 text channel(
    them yet.
 4. For each link, it checks whether Discord produced an embed *with a playable
    video*. This is judged per link, not per message: a message holding both a
-   YouTube link and a TikTok link still gets the TikTok re-hosted.
+   YouTube link and a TikTok link still gets the TikTok re-hosted. The match
+   is on video identity rather than URL text, because Discord canonicalises
+   what it unfurls - post `youtu.be/XYZ` and the embed comes back as
+   `youtube.com/watch?v=XYZ`, which matched nothing until `detect.identity`
+   compared ids as well as host and path.
 5. Anything left over is downloaded and posted, up to
    `MAX_LINKS_PER_MESSAGE`.
 

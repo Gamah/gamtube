@@ -270,10 +270,18 @@ conflating them is the trap here. The unfurler reads `/d/{key}` and identifies
 as `Discordbot`, so `bot/agents.py` can safely serve people a notice page
 instead of `og:` tags (`HUMAN_NOTICE`, on by default - only a crawler needs the
 metadata). The media proxy that fetches `/d/{key}/f` is something else, and its
-user agent is **not known here**: gating the bytes on the crawler list would
+user agent was **not known here**: gating the bytes on the crawler list would
 block Discord's own fetcher and kill every embed. `MEDIA_USER_AGENTS` is a
 separate list, empty by default, and every media fetch is logged with its agent
 and address so it can be filled from evidence rather than guessed.
+
+The log now has that evidence, from one link on 2026-10-22: the media fetch
+sent `Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)` from
+`104.196.222.45`, while the page fetch came from `35.227.62.178` with the same
+agent. So the two services share a user agent and differ by address, both
+inside Google Cloud. That is **one observation, not a contract** - it says
+`MEDIA_USER_AGENTS=discordbot` would have worked that day, not that it is safe
+to pin. The gate stays open by default.
 
 **The TTL is a bet.** `LINK_TTL_SECONDS` (300) assumes Discord keeps its own
 copy once it has unfurled a link, so the link may then die. If Discord instead
@@ -384,6 +392,14 @@ embeds" - TikTok and Instagram normally do produce an embed, just a dead
 link-card. It is evaluated per link (`bot/detect.unembedded`), because a
 message holding both a YouTube link and a TikTok link must still get the TikTok
 re-hosted.
+
+**Discord does not echo back the link it unfurled - it canonicalises it**, so
+the embed for `youtu.be/XYZ` arrives as `youtube.com/watch?v=XYZ`. Comparing
+host plus path therefore matched nothing and re-hosted videos that were
+already playing; `detect.identity()` compares the video id too (last path
+segment, with a stoplist of route words, plus `v`/`video_id`/`story_fbid`),
+case-insensitively. Any short-link host has the same problem: `fb.watch`,
+`redd.it`, `vm.tiktok.com`.
 
 Links wrapped as `<https://...>` are skipped on purpose: that syntax is how a
 Discord user suppresses an embed, so overriding it would be rude.
