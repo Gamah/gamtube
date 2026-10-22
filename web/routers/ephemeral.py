@@ -115,10 +115,42 @@ def discord_page(key: str, request: Request) -> Response:
         canonical_url=f"{base}/d/{key}",
         video_url=f"{base}/d/{key}/f",
         video_mime=item.content_type,
+        # Only when we actually hold one: an og:image pointing at a 404 is
+        # worse than none, since Discord may then show a broken card.
+        poster_url=f"{base}/d/{key}/p" if item.poster else None,
+        poster_mime=item.poster_type,
         title=item.title,
         width=item.width,
         height=item.height,
         duration=item.duration,
+    )
+
+
+@router.api_route("/{key}/p", methods=["GET", "HEAD"])
+def discord_poster(key: str, request: Request) -> Response:
+    """The card's poster frame, as the platform gave it to us.
+
+    Not counted as serving the video: `record_served` drives the warmup wait,
+    and a poster fetch says nothing about whether Discord has the film.
+    """
+    item = _lookup(request, key)
+    if item is None or not item.poster:
+        log.info("poster %s 404: %s", key,
+                 "not in store" if item is None else "no thumbnail was held")
+        return Response(status_code=404)
+
+    headers = {"Cache-Control": "public, max-age=300"}
+    if request.method == "HEAD":
+        return Response(
+            status_code=200,
+            media_type=item.poster_type,
+            headers={**headers, "Content-Length": str(len(item.poster))},
+        )
+    log.info("poster %s serving %dKB ua=%r from %s",
+             key, len(item.poster) // 1024,
+             request.headers.get("user-agent") or "-", _client(request))
+    return Response(
+        content=item.poster, media_type=item.poster_type, headers=headers
     )
 
 

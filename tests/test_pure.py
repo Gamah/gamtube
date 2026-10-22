@@ -239,6 +239,19 @@ store.put("a", item(100, title="A"))
 got = store.get("a")
 eq("roundtrip", got.title if got else None, "A")
 eq("size reported", store.total_bytes(), 100)
+
+# A poster rides along with the video. It must not count towards ranges, which
+# are served against the film, but it must count towards the store's budget.
+posted = item(100, poster=b"p" * 40, poster_type="image/png")
+eq("size is the video only", posted.size, 100)
+eq("footprint includes the poster", posted.footprint, 140)
+eq("no poster, no difference", item(100).footprint, 100)
+eq("serving the video ignores the poster",
+   (posted.record_served(100), posted.complete)[1], True)
+postered = MemoryStore(ttl_seconds=10, max_bytes=1000, now=clock)
+postered.put("p", item(100, poster=b"p" * 40, poster_type="image/png"))
+eq("the budget counts posters", postered.total_bytes(), 140)
+
 eq("missing key", store.get("nope"), None)
 eq("contains", "a" in store, True)
 

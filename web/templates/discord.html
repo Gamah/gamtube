@@ -15,6 +15,11 @@
 {% if width %}<meta property="og:video:width"  content="{{ width }}">{% endif %}
 {% if height %}<meta property="og:video:height" content="{{ height }}">{% endif %}
 {% if duration %}<meta property="og:video:duration" content="{{ duration }}">{% endif %}
+{# the poster frame. Without it Discord sources the card image itself and
+   re-fetches it per view, so the card goes blank the moment the link dies. #}
+{% if poster_url %}<meta property="og:image"            content="{{ poster_url }}">
+<meta property="og:image:secure_url" content="{{ poster_url }}">
+{% if poster_mime %}<meta property="og:image:type"       content="{{ poster_mime }}">{% endif %}{% endif %}
 <meta name="twitter:card" content="player">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }

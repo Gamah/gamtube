@@ -24,6 +24,11 @@ from dataclasses import dataclass, field
 class Item:
     data: bytes
     content_type: str
+    # The upstream thumbnail, if the platform gave us one. Discord fetches it
+    # for the card's poster frame, so it lives and dies with the video: an
+    # expired link's card goes blank either way.
+    poster: bytes | None = None
+    poster_type: str | None = None
     title: str | None = None
     width: int | None = None
     height: int | None = None
@@ -41,7 +46,13 @@ class Item:
 
     @property
     def size(self) -> int:
+        """Video bytes. This is what ranges are served against."""
         return len(self.data)
+
+    @property
+    def footprint(self) -> int:
+        """What the item costs the store: the video plus its poster."""
+        return len(self.data) + len(self.poster or b"")
 
     def record_served(self, count: int, whole: bool = False) -> None:
         """Note bytes sent. `whole` means a full-body response, not a range.
@@ -131,7 +142,7 @@ class MemoryStore:
             pass  # never let instrumentation break eviction
 
     def _total_locked(self) -> int:
-        return sum(i.size for i in self._items.values())
+        return sum(i.footprint for i in self._items.values())
 
     def _prune_locked(self) -> int:
         if self._ttl <= 0:

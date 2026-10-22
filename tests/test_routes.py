@@ -43,10 +43,14 @@ HUMAN_UA = ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 
 
 BODY = bytes(range(256)) * 8  # 2048 bytes, every value, so slices are checkable
 
+POSTER = b"\x89PNG\r\n\x1a\n" + bytes(range(64))
+
 store = MemoryStore(ttl_seconds=100, max_bytes=10_000)
 store.put("abc123", Item(
     data=BODY,
     content_type="video/mp4",
+    poster=POSTER,
+    poster_type="image/png",
     title="A Clip",
     width=1280,
     height=720,
@@ -109,6 +113,9 @@ try:
     ok("og:video:duration", 'content="42"' in html)
     ok("og:title", 'property="og:title" content="A Clip"' in html)
     ok("canonical url", 'property="og:url"              content="http://localhost/d/abc123"' in html)
+    ok("og:image points at the poster route",
+       'property="og:image"            content="http://localhost/d/abc123/p"' in html)
+    ok("og:image:type", 'property="og:image:type"       content="image/png"' in html)
 
     # ---- the page a person sees ----
     r = human("/d/abc123")
@@ -170,6 +177,40 @@ try:
     eq("head has no body", r.content, b"")
 
     eq("missing key media 404s", crawl("/d/nope/f").status_code, 404)
+
+    # ---- the poster, which is why an expired card used to go blank ----
+    r = crawl("/d/abc123/p")
+    eq("poster status", r.status_code, 200)
+    eq("poster body", r.content, POSTER)
+    eq("poster type", r.headers["content-type"], "image/png")
+    r = client.head("/d/abc123/p", headers={"User-Agent": CRAWLER_UA})
+    eq("poster head length", r.headers["content-length"], str(len(POSTER)))
+    eq("poster head has no body", r.content, b"")
+    eq("missing key poster 404s", crawl("/d/nope/p").status_code, 404)
+
+    # An item held with no thumbnail must 404 rather than serve an empty body,
+    # and its page must leave og:image out entirely.
+    bare = MemoryStore(ttl_seconds=100, max_bytes=10_000)
+    bare.put("nopost", Item(data=BODY, content_type="video/mp4"))
+    bare_app = FastAPI()
+    bare_app.state.bot_store = bare
+    bare_app.include_router(ephemeral.router)
+    bare_client = TestClient(bare_app)
+    eq("no thumbnail held 404s",
+       bare_client.get("/d/nopost/p", headers={"User-Agent": CRAWLER_UA}).status_code,
+       404)
+    ok("no og:image without a poster",
+       "og:image" not in bare_client.get(
+           "/d/nopost", headers={"User-Agent": CRAWLER_UA}).text)
+
+    # A poster fetch is not progress on the video: the warmup wait depends on
+    # that distinction, and a card image arriving first must not release it.
+    bare.put("withpost", Item(data=BODY, content_type="video/mp4",
+                              poster=POSTER, poster_type="image/png"))
+    eq("poster of an unserved item",
+       bare_client.get("/d/withpost/p",
+                       headers={"User-Agent": CRAWLER_UA}).status_code, 200)
+    ok("poster does not count as served", not bare.is_complete("withpost"))
 
     # ---- byte accounting drives the warmup wait, so the route must record it
     fresh = MemoryStore(ttl_seconds=100, max_bytes=10_000)

@@ -362,6 +362,13 @@ file. They are not decorative: without them Discord sizes the player badly or
 degrades the embed to a plain card, which is the exact failure this bot exists
 to fix.
 
+`og:image` is the platform's own thumbnail, held beside the video and served
+from `/d/{key}/p`. Without it Discord has to come up with the card image
+itself and fetches it from us on every view, so a card went blank the moment
+the link expired even though the video it had already pulled still played. It
+is emitted only when a thumbnail was actually downloaded, and it expires with
+the video, so a card old enough will still go blank in the end.
+
 ---
 
 ## Memory

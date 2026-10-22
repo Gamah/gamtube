@@ -79,6 +79,29 @@ def _dimensions(path: Path) -> tuple[int | None, int | None, int | None]:
     return stream.get("width"), stream.get("height"), seconds
 
 
+_POSTER_TYPES = {
+    ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png",
+    ".webp": "image/webp", ".gif": "image/gif",
+}
+
+
+def _poster(thumb: Path | None) -> tuple[bytes | None, str | None]:
+    """The upstream thumbnail, for the card's poster frame.
+
+    `web/templates/discord.html` emitted no `og:image` at all, so Discord had
+    to come up with the card image itself and fetched it from us every time -
+    which is why a card went blank the moment the link expired while the video
+    it had already pulled kept playing. Tens of KB, so it rides along with the
+    video rather than getting a lifetime of its own.
+    """
+    if thumb is None or not thumb.exists():
+        return None, None
+    mime = _POSTER_TYPES.get(thumb.suffix.lower())
+    if mime is None:
+        return None, None
+    return thumb.read_bytes(), mime
+
+
 def _boxes(path: Path) -> list[tuple[str, int, int]]:
     """Top level mp4 boxes, read by mmap so a huge mdat is never loaded."""
     if path.stat().st_size == 0:
@@ -165,8 +188,8 @@ def _prepare(
     """
     cap = settings.max_item_mb * 1024 * 1024
     t0 = time.monotonic()
-    info, src, _ = download(
-        url, tmp, None, fmt=_format_selector(cap), writethumbnail=False
+    info, src, thumb = download(
+        url, tmp, None, fmt=_format_selector(cap), writethumbnail=True
     )
     size = src.stat().st_size
     log.info("download %s in %.1fs -> %s %.1fMB (extractor=%s)",
@@ -237,14 +260,17 @@ def _prepare(
         # og:video:width/height drive the player size on the link path;
         # missing them is the likeliest cause of a plain card.
         log.warning("%s has no probe dimensions; the embed may degrade", url)
-    log.info("prepared %s: %.1fMB %sx%s %ss total %.1fs (attach=%s: %s)",
+    poster, poster_type = _poster(thumb)
+    log.info("prepared %s: %.1fMB %sx%s %ss poster=%s total %.1fs (attach=%s: %s)",
              url, size / 1048576, width, height, duration,
-             time.monotonic() - t0, fits, reason)
+             poster_type or "none", time.monotonic() - t0, fits, reason)
     title = clean_title(info.get("title"))
     return Prepared(
         item=Item(
             data=src.read_bytes(),
             content_type="video/mp4" if src.suffix.lower() == ".mp4" else "video/webm",
+            poster=poster,
+            poster_type=poster_type,
             title=title,
             width=width,
             height=height,

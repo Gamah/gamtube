@@ -291,15 +291,22 @@ before still played the next day, long past the 300s TTL, so Discord keeps the
 video. One Facebook embed was the exception and did not play, cause not yet
 known.
 
-The **thumbnail** does not survive, though: a card's image dies with the link.
-`web/templates/discord.html` emits no `og:image` - the only images in the repo
-are the web app's own thumbnails, and the bot never writes one - so whatever
-Discord shows there it is fetching from us rather than storing. Which means a
-card that has not been played yet degrades after expiry even though the video
-behind it would still play. Giving the page a real poster frame would be new
-work: ffmpeg a frame at prepare time, hold it beside the video, serve it as
-`/d/{key}/p`, and emit `og:image`. It dies with the TTL like everything else
-unless it outlives it deliberately, which is the first thing to decide.
+The **thumbnail** does not survive, and that is now understood: the page
+emitted no `og:image` at all, so Discord sourced the card image itself and
+re-fetched it per view. `Item.poster` holds the thumbnail yt-dlp already
+downloads, `/d/{key}/p` serves it and `discord.html` emits `og:image` only
+when one is held - an `og:image` pointing at a 404 is worse than none. It is
+the platform's own thumbnail rather than an ffmpeg frame grab, so it costs no
+extra subprocess.
+
+Two things that follow. `Item.size` is the video alone, because ranges are
+served against it, while `Item.footprint` adds the poster and is what
+`MAX_MEMORY_MB` counts - using `size` for the budget would silently under-count.
+And a poster fetch deliberately does **not** call `record_served`: the warmup
+wait turns on having served the film, and a card image arriving first must not
+release it. The poster expires with its video, so an old card still goes blank
+eventually; giving posters a longer life of their own is the next step if that
+matters.
 
 **None of this applies to an attachment**, which sidesteps the whole question
 and is why it is tried first.
