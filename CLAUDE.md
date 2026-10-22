@@ -286,10 +286,23 @@ to pin. The gate stays open by default.
 **The TTL is a bet.** `LINK_TTL_SECONDS` (300) assumes Discord keeps its own
 copy once it has unfurled a link, so the link may then die. If Discord instead
 proxies every view from the origin, expiry leaves a dead embed in channel
-history. This was never measured - settle it by posting a link, waiting out the
-TTL and trying to play the embed from another account, and raise the TTL if it
-fails. **It only applies to the fallback**: an attachment sidesteps the whole
-question, which is why it is now tried first.
+history. **Measured on 2026-10-22 and the bet holds**: links posted the night
+before still played the next day, long past the 300s TTL, so Discord keeps the
+video. One Facebook embed was the exception and did not play, cause not yet
+known.
+
+The **thumbnail** does not survive, though: a card's image dies with the link.
+`web/templates/discord.html` emits no `og:image` - the only images in the repo
+are the web app's own thumbnails, and the bot never writes one - so whatever
+Discord shows there it is fetching from us rather than storing. Which means a
+card that has not been played yet degrades after expiry even though the video
+behind it would still play. Giving the page a real poster frame would be new
+work: ffmpeg a frame at prepare time, hold it beside the video, serve it as
+`/d/{key}/p`, and emit `og:image`. It dies with the TTL like everything else
+unless it outlives it deliberately, which is the first thing to decide.
+
+**None of this applies to an attachment**, which sidesteps the whole question
+and is why it is tried first.
 
 **Attachment first, link second.** `_upload_cap()` reads
 `guild.filesize_limit` (10/50/100 MiB by tier, boosts already included), and
